@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 800" width="1280" height="800">
+  <defs>
+    <radialGradient id="room" cx="50%" cy="35%" r="80%">
+      <stop offset="0%" stop-color="#3a2f55"/>
+      <stop offset="55%" stop-color="#211a36"/>
+      <stop offset="100%" stop-color="#0d0a17"/>
+    </radialGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1b1340"/>
+      <stop offset="100%" stop-color="#0a1230"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8A5AAB" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#8A5AAB" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#a9763f"/>
+      <stop offset="100%" stop-color="#7c5126"/>
+    </linearGradient>
+    <linearGradient id="desk" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a2030"/>
+      <stop offset="100%" stop-color="#140f1a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Room -->
+  <rect width="1280" height="800" fill="url(#room)"/>
+
+  <!-- Monitor glow on the character -->
+  <ellipse cx="640" cy="430" rx="520" ry="360" fill="url(#glow)"/>
+
+  <!-- ===== Gremlin (Mogwai) ===== -->
+  <g>
+    <!-- Big ears -->
+    <path d="M455 360 C 300 300, 250 200, 330 150 C 360 250, 470 290, 520 320 Z" fill="url(#fur)" stroke="#5e3c1c" stroke-width="4"/>
+    <path d="M825 360 C 980 300, 1030 200, 950 150 C 920 250, 810 290, 760 320 Z" fill="url(#fur)" stroke="#5e3c1c" stroke-width="4"/>
+    <path d="M470 345 C 360 300, 320 220, 365 185 C 390 260, 470 295, 510 320 Z" fill="#e9cba0" opacity="0.85"/>
+    <path d="M810 345 C 920 300, 960 220, 915 185 C 890 260, 810 295, 770 320 Z" fill="#e9cba0" opacity="0.85"/>
+
+    <!-- Body / shoulders -->
+    <path d="M430 720 C 420 560, 500 470, 640 470 C 780 470, 860 560, 850 720 Z" fill="url(#fur)" stroke="#5e3c1c" stroke-width="4"/>
+    <!-- Cream belly -->
+    <path d="M520 720 C 510 600, 560 540, 640 540 C 720 540, 770 600, 760 720 Z" fill="#efd6ad"/>
+
+    <!-- Head -->
+    <ellipse cx="640" cy="385" rx="180" ry="160" fill="url(#fur)" stroke="#5e3c1c" stroke-width="4"/>
+    <!-- Cream face patch -->
+    <path d="M520 420 C 520 320, 560 280, 640 280 C 720 280, 760 320, 760 420 C 760 480, 700 510, 640 510 C 580 510, 520 480, 520 420 Z" fill="#f3ddb8"/>
+    <!-- Brow tuft -->
+    <path d="M560 270 C 600 245, 680 245, 720 270 C 690 255, 590 255, 560 270 Z" fill="#5e3c1c"/>
+
+    <!-- Nose -->
+    <ellipse cx="640" cy="445" rx="22" ry="15" fill="#5e3c1c"/>
+    <!-- Mouth -->
+    <path d="M600 478 C 625 498, 655 498, 680 478" fill="none" stroke="#5e3c1c" stroke-width="5" stroke-linecap="round"/>
+
+    <!-- Sunglasses -->
+    <g>
+      <rect x="548" y="372" width="80" height="46" rx="16" fill="#0b0b0f"/>
+      <rect x="652" y="372" width="80" height="46" rx="16" fill="#0b0b0f"/>
+      <rect x="624" y="386" width="32" height="8" rx="4" fill="#1b1b22"/>
+      <line x1="548" y1="384" x2="500" y2="372" stroke="#0b0b0f" stroke-width="8" stroke-linecap="round"/>
+      <line x1="732" y1="384" x2="780" y2="372" stroke="#0b0b0f" stroke-width="8" stroke-linecap="round"/>
+      <!-- Lens reflections (purple Stremio vibe) -->
+      <rect x="560" y="380" width="26" height="12" rx="6" fill="#8A5AAB" opacity="0.7"/>
+      <rect x="664" y="380" width="26" height="12" rx="6" fill="#8A5AAB" opacity="0.7"/>
+    </g>
+
+    <!-- Paws on the keyboard -->
+    <ellipse cx="500" cy="690" rx="50" ry="32" fill="url(#fur)" stroke="#5e3c1c" stroke-width="3"/>
+    <ellipse cx="780" cy="690" rx="50" ry="32" fill="url(#fur)" stroke="#5e3c1c" stroke-width="3"/>
+  </g>
+
+  <!-- ===== Desk + Computer ===== -->
+  <rect x="0" y="700" width="1280" height="100" fill="url(#desk)"/>
+  <rect x="0" y="700" width="1280" height="6" fill="#3a2f45"/>
+
+  <!-- Monitor (in front, slightly) -->
+  <g>
+    <rect x="360" y="612" width="560" height="96" rx="10" fill="#0c0a14"/>
+    <rect x="360" y="430" width="560" height="200" rx="14" fill="#1a1430" stroke="#000" stroke-width="6"/>
+    <rect x="374" y="444" width="532" height="172" rx="8" fill="url(#screen)"/>
+    <!-- Code lines -->
+    <g opacity="0.9">
+      <rect x="394" y="466" width="120" height="10" rx="5" fill="#8A5AAB"/>
+      <rect x="524" y="466" width="180" height="10" rx="5" fill="#5fd0c5"/>
+      <rect x="414" y="492" width="220" height="10" rx="5" fill="#e0c074"/>
+      <rect x="414" y="518" width="140" height="10" rx="5" fill="#7aa2f7"/>
+      <rect x="564" y="518" width="90" height="10" rx="5" fill="#8A5AAB"/>
+      <rect x="394" y="544" width="260" height="10" rx="5" fill="#5fd0c5"/>
+      <rect x="414" y="570" width="180" height="10" rx="5" fill="#e0c074"/>
+    </g>
+    <!-- Play badge -->
+    <circle cx="840" cy="540" r="34" fill="#8A5AAB"/>
+    <path d="M828 522 L828 558 L860 540 Z" fill="#fff"/>
+  </g>
+
+  <!-- Keyboard -->
+  <rect x="470" y="700" width="340" height="44" rx="8" fill="#1d1726" stroke="#000" stroke-width="3"/>
+  <g fill="#36304a">
+    <rect x="486" y="710" width="28" height="10" rx="2"/>
+    <rect x="520" y="710" width="28" height="10" rx="2"/>
+    <rect x="554" y="710" width="28" height="10" rx="2"/>
+    <rect x="588" y="710" width="28" height="10" rx="2"/>
+    <rect x="622" y="710" width="28" height="10" rx="2"/>
+    <rect x="656" y="710" width="28" height="10" rx="2"/>
+    <rect x="690" y="710" width="28" height="10" rx="2"/>
+    <rect x="724" y="710" width="28" height="10" rx="2"/>
+    <rect x="520" y="726" width="240" height="10" rx="3"/>
+  </g>
+</svg>

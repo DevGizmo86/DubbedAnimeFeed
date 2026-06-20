@@ -1,0 +1,111 @@
+# Anime Doppiati ITA
+
+Addon per [Stremio](https://www.stremio.com/) che pubblica un **catalogo con le ultime uscite di anime doppiati in italiano**, usando come fonte [AnimeUnity](https://www.animeunity.so/).
+
+## Cosa fa
+
+L'addon aggiunge a Stremio un catalogo (`Ultime uscite doppiate ITA`) che elenca gli anime con doppiaggio italiano **ordinati per uscita dell'ultimo episodio**: il primo elemento è l'anime il cui episodio doppiato è uscito più di recente. Ogni elemento usa un **id Kitsu** (`kitsu:<id>`) e l'addon fornisce direttamente la **scheda con la lista episodi** (metadati da [Kitsu](https://kitsu.io/)).
+
+L'addon **non riproduce video**: per le **fonti/streaming** serve un addon di streaming anime (vedi sotto). La scheda e gli episodi, invece, vengono caricati dall'addon stesso, senza dipendere da Anime Kitsu.
+
+### Come funziona (flusso)
+
+**Catalogo:**
+
+1. Scorre il feed "ultimi episodi" di AnimeUnity (paginatore embeddato in `<layout-items>` sulla home, via `?page=N`), che è ordinato per data di uscita degli episodi.
+2. Tiene solo gli episodi **doppiati** (`anime.dub === 1`) e deduplica per anime, mantenendo la prima occorrenza (la più recente): così l'ordine riflette quale anime ha avuto l'ultimo episodio doppiato per ultimo.
+3. Per ogni anime ricava l'id [Kitsu](https://kitsu.io/) tramite il suo `anilist_id` / `mal_id` (endpoint `mappings` di Kitsu, con cache).
+4. Restituisce a Stremio le anteprime del catalogo con id `kitsu:<id>`, poster, trama e voto. Il catalogo assemblato è in cache 10 minuti.
+
+**Scheda (meta):** all'apertura di un elemento, l'addon costruisce la scheda dall'API di Kitsu (dettaglio anime + lista episodi). Gli episodi usano video id nel formato `kitsu:<id>:<episodio>`, lo stesso che si aspettano gli addon di streaming anime, così possono agganciare le fonti.
+
+## Addon consigliati (per lo streaming)
+
+Catalogo e scheda funzionano da soli. Per **guardare** gli episodi serve in più un addon di **streaming anime** (es. Torrentio in modalità anime, o equivalenti) che riconosca gli id `kitsu:`.
+
+## Requisiti
+
+- [Node.js](https://nodejs.org/) **18 o superiore**
+- Connessione a internet (l'addon interroga le API pubbliche di AnimeUnity e Kitsu)
+
+## Installazione e avvio
+
+```bash
+# Installa le dipendenze
+npm install
+
+# Avvia l'addon
+npm start
+```
+
+L'addon si avvia di default sulla porta **7000**. In console vedrai:
+
+```
+Addon attivo su http://localhost:7000
+Configura/installa su Stremio: http://localhost:7000/configure
+```
+
+Per lo sviluppo è disponibile uno script con log di debug e auto-reload:
+
+```bash
+npm run dev
+```
+
+### Avvio con Docker
+
+È incluso un `Dockerfile` pronto all'uso in [docker/](docker/):
+
+```bash
+docker build -f docker/Dockerfile -t dubbed-anime-feed .
+docker run -p 7000:7000 dubbed-anime-feed
+```
+
+> Nota: il `Dockerfile` è volutamente fuori dalla root del progetto. Beamup (l'hosting su cui si pubblica l'addon) usa il buildpack Node standard tramite `package.json`; un `Dockerfile` nella root farebbe partire il buildpack Docker, incompatibile con il suo avvio dei processi.
+
+## Deploy su Beamup
+
+L'addon si pubblica su [Beamup](https://github.com/Stremio/stremio-beamup) (hosting Dokku per addon Stremio). Il deploy avviene via `git push`.
+
+```bash
+git push beamup
+```
+
+> ⚠️ **Importante:** Beamup fa il deploy dal branch **`main`**, non `master`. Configura il refspec corretto:
+> ```bash
+> git config remote.beamup.push refs/heads/main:refs/heads/main
+> ```
+
+### Le modifiche non si vedono dopo il deploy?
+
+Davanti a Beamup c'è **Cloudflare**, che mette in cache il manifest. Dopo un deploy riuscito conviene **incrementare il campo `version`** nel manifest ([addon.js](addon.js) e [package.json](package.json)) e, in Stremio, **rimuovere e reinstallare** l'addon per rileggere il manifest aggiornato.
+
+## Variabili d'ambiente
+
+| Variabile | Default | Descrizione |
+|-----------|---------|-------------|
+| `PORT` | `7000` | Porta su cui resta in ascolto il server. |
+| `DEBUG` | *(disattivo)* | Impostala a `1` o `true` per stampare log dettagliati (richieste/risposte ad AnimeUnity e Kitsu). |
+
+Esempio:
+
+```bash
+# PowerShell
+$env:DEBUG = "1"; node index.js
+
+# Bash
+DEBUG=1 node index.js
+```
+
+## Architettura
+
+- **[index.js](index.js)** — Server [Express](https://expressjs.com/) che monta il router dell'addon SDK, serve gli asset statici (logo e sfondo) da [assets/](assets/) e personalizza la pagina di landing/installazione.
+- **[addon.js](addon.js)** — Definisce il `manifest` (catalogo, tipi) e i gestori `catalog` e `meta` che rispondono alle richieste di Stremio.
+- **[services/animeunity.js](services/animeunity.js)** — Integrazione con AnimeUnity: lettura del feed "ultimi episodi", filtro dei doppiati e deduplica per anime, mapping verso gli id Kitsu e cache del catalogo.
+- **[services/kitsu.js](services/kitsu.js)** — Costruzione della scheda (meta) dall'API Kitsu: dettaglio anime, generi, lista episodi con video id `kitsu:<id>:<episodio>`, con cache.
+- **[debug.js](debug.js)** — Piccola utility di logging condizionata dalla variabile `DEBUG`.
+
+## Limitazioni
+
+- Il catalogo dipende dalla disponibilità dei titoli su AnimeUnity e dalla presenza di un mapping su Kitsu: i titoli senza mapping Kitsu vengono esclusi.
+- L'addon si appoggia a un'API pubblica non ufficiale di AnimeUnity: eventuali modifiche lato loro possono richiedere aggiornamenti.
+- Per scheda completa e riproduzione servono gli addon anime dell'ecosistema (Anime Kitsu + un provider di stream).

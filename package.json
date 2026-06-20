@@ -1,0 +1,18 @@
+{
+  "name": "dubbed-anime-feed",
+  "version": "1.0.0",
+  "description": "Stremio addon: catalogo con le ultime uscite di anime doppiati in italiano (fonte AnimeUnity), con id Kitsu per l'integrazione con gli addon di streaming anime.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "set DEBUG=1&& node --watch index.js"
+  },
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.10",
+    "express": "^4.22.2",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
