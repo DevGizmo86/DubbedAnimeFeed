@@ -44,7 +44,7 @@ const landingHTML = landingTemplate(addonInterface.manifest)
 			</a>
 			<button id="copyManifestBtn" type="button" style="margin-top:1.5vh;background:#5a5a7a;">Copia link manifest</button>
 			<p style="margin-top:2.5vh;text-align:center;opacity:0.85;">Powered by <a href="https://github.com/DevGizmo86" target="_blank" rel="noopener">DevGizmo</a></p>
-			<p style="margin-top:0.5vh;text-align:center;opacity:0.85;"><a href="https://buymeacoffee.com/devgizmo" target="_blank" rel="noopener">☕ Buy me a coffee</a></p>`
+			<div style="text-align:center;margin-top:1.5vh;"><a href="https://buymeacoffee.com/devgizmo" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:0.8vh;padding:1.2vh 2.4vh;background:#ffdd00;color:#000;font-weight:600;text-decoration:none;border-radius:2.5vh;">☕ Support me</a></div>`
   )
   // Wire up the copy button: derive the plain-HTTP manifest URL from the
   // stremio:// install link and put it on the clipboard.
