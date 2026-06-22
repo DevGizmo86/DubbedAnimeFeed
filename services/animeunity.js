@@ -24,6 +24,19 @@ const CATALOG_TTL_MS = 10 * 60 * 1000; // 10 minutes
 // Key: "anilist/anime:889" or "myanimelist/anime:889" → kitsu id (or null).
 const kitsuCache = new Map();
 
+// Search results (the "all dubbed anime" search-only catalog) are cached per
+// normalized query, so paging through results doesn't re-hit AnimeUnity.
+const searchCache = new Map(); // normalizedQuery → { metas, builtAt }
+const SEARCH_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const SEARCH_API_PAGE = 30; // archivio/get-animes returns up to 30 records/page
+const MAX_SEARCH_PAGES = 6; // cap work per query (~180 results)
+
+// The archivio search endpoint is CSRF-protected: every request needs the
+// csrf-token from the homepage <meta> plus the XSRF-TOKEN/session cookies it
+// hands out. Cache that handshake briefly and reuse it across searches.
+let auContext = null; // { csrf, xsrfToken, cookies, builtAt }
+const AU_CTX_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
 // Decode the HTML entities AnimeUnity uses inside the items-json attribute.
 function decodeEntities(s) {
   return s
@@ -147,19 +160,12 @@ function cleanTitle(anime) {
   return raw.replace(/\s*\(ITA\)\s*$/i, "").trim();
 }
 
-// Build the full catalog: distinct dubbed anime (ordered by latest episode)
-// turned into Stremio meta previews with Kitsu ids. Anime without a Kitsu
-// mapping are dropped (no ecosystem id → other addons couldn't attach
-// streams/meta to them anyway). Cached for CATALOG_TTL_MS.
-async function buildCatalog() {
-  if (catalogCache && Date.now() - catalogCache.builtAt < CATALOG_TTL_MS) {
-    return catalogCache.metas;
-  }
-
-  const anime = await collectDubbedAnime();
-
+// Turn AnimeUnity anime records into Stremio meta previews with Kitsu ids.
+// Anime without a Kitsu mapping are dropped (no ecosystem id → other addons
+// couldn't attach streams/meta to them anyway). Order is preserved.
+async function recordsToMetas(records) {
   const previews = await Promise.all(
-    anime.map(async (a) => {
+    records.map(async (a) => {
       const kitsuId = await resolveKitsuId(a);
       if (!kitsuId) {
         debug(`No Kitsu mapping for "${cleanTitle(a)}" (au id ${a.id})`);
@@ -178,8 +184,18 @@ async function buildCatalog() {
       };
     })
   );
+  return previews.filter(Boolean);
+}
 
-  const metas = previews.filter(Boolean);
+// Build the full catalog: distinct dubbed anime (ordered by latest episode)
+// turned into Stremio meta previews with Kitsu ids. Cached for CATALOG_TTL_MS.
+async function buildCatalog() {
+  if (catalogCache && Date.now() - catalogCache.builtAt < CATALOG_TTL_MS) {
+    return catalogCache.metas;
+  }
+
+  const anime = await collectDubbedAnime();
+  const metas = await recordsToMetas(anime);
   catalogCache = { metas, builtAt: Date.now() };
   debug(`buildCatalog: ${metas.length} kitsu meta(s) cached`);
   return metas;
@@ -193,4 +209,105 @@ async function getDubbedCatalog(skip) {
   return all.slice(start, start + CATALOG_PAGE_SIZE);
 }
 
-module.exports = { getDubbedCatalog };
+// Fetch (and cache) the CSRF token + cookies required to call the archivio
+// search endpoint. AnimeUnity rotates these, so the context has its own TTL.
+async function getAuContext() {
+  if (auContext && Date.now() - auContext.builtAt < AU_CTX_TTL_MS) {
+    return auContext;
+  }
+  const res = await fetch(`${AU_BASE}/`, {
+    headers: { "User-Agent": UA, Accept: "text/html" },
+  });
+  if (!res.ok) throw new Error(`AnimeUnity home error: ${res.status}`);
+
+  const setCookie = res.headers.raw()["set-cookie"] || [];
+  const html = await res.text();
+  const meta = html.match(/<meta name="csrf-token" content="([^"]+)"/);
+  const cookies = setCookie.map((c) => c.split(";")[0]).join("; ");
+  const xsrf = setCookie.find((c) => c.startsWith("XSRF-TOKEN="));
+  const xsrfToken = xsrf
+    ? decodeURIComponent(xsrf.split(";")[0].split("=")[1])
+    : "";
+
+  auContext = { csrf: meta ? meta[1] : "", xsrfToken, cookies, builtAt: Date.now() };
+  debug(`AnimeUnity: refreshed archivio context (csrf ${auContext.csrf ? "ok" : "missing"})`);
+  return auContext;
+}
+
+// One page of the dubbed archivio search. `offset` is a raw record offset.
+async function fetchSearchPage(query, offset) {
+  const ctx = await getAuContext();
+  const res = await fetch(`${AU_BASE}/archivio/get-animes`, {
+    method: "POST",
+    headers: {
+      "User-Agent": UA,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      "X-CSRF-TOKEN": ctx.csrf,
+      "X-XSRF-TOKEN": ctx.xsrfToken,
+      Cookie: ctx.cookies,
+      Referer: `${AU_BASE}/archivio`,
+    },
+    body: JSON.stringify({
+      title: query || "",
+      type: false,
+      year: false,
+      order: false,
+      status: false,
+      genres: false,
+      offset,
+      dubbed: true,
+      season: false,
+    }),
+  });
+  if (!res.ok) throw new Error(`AnimeUnity search error: ${res.status}`);
+  const json = await res.json();
+  return Array.isArray(json.records) ? json.records : [];
+}
+
+// Build the full set of dubbed anime matching `query`, mapped to Kitsu metas.
+// Walks the archivio pages (capped) and caches the result per query.
+async function buildSearchResults(query) {
+  const key = (query || "").trim().toLowerCase();
+  const cached = searchCache.get(key);
+  if (cached && Date.now() - cached.builtAt < SEARCH_TTL_MS) {
+    return cached.metas;
+  }
+
+  const records = [];
+  const seen = new Set();
+  let offset = 0;
+  for (let page = 0; page < MAX_SEARCH_PAGES; page++) {
+    let pageRecords;
+    try {
+      pageRecords = await fetchSearchPage(query, offset);
+    } catch (err) {
+      debug(`AnimeUnity: stopping search walk at offset ${offset}: ${err.message}`);
+      break;
+    }
+    if (pageRecords.length === 0) break;
+    offset += pageRecords.length;
+    for (const r of pageRecords) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      records.push(r);
+    }
+    if (pageRecords.length < SEARCH_API_PAGE) break; // last page
+  }
+
+  debug(`AnimeUnity: search "${key}" → ${records.length} dubbed record(s)`);
+  const metas = await recordsToMetas(records);
+  searchCache.set(key, { metas, builtAt: Date.now() });
+  return metas;
+}
+
+// Return one page of search results. Like the feed catalog, Stremio paginates
+// by sending `skip` (items already loaded); we slice the assembled list.
+async function searchDubbedCatalog(query, skip) {
+  const all = await buildSearchResults(query);
+  const start = skip || 0;
+  return all.slice(start, start + CATALOG_PAGE_SIZE);
+}
+
+module.exports = { getDubbedCatalog, searchDubbedCatalog };

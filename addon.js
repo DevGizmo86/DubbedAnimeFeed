@@ -1,16 +1,17 @@
 const { addonBuilder } = require("stremio-addon-sdk");
-const { getDubbedCatalog } = require("./services/animeunity");
+const { getDubbedCatalog, searchDubbedCatalog } = require("./services/animeunity");
 const { getKitsuMeta } = require("./services/kitsu");
 const debug = require("./debug");
 
 const CATALOG_ID = "au-dubbed-latest";
+const SEARCH_CATALOG_ID = "au-dubbed-search";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.0.0",
+  version: "1.1.0",
   name: "DubbedAnimeFeed",
   description:
-    "Catalogo con le ultime uscite di anime doppiati in italiano (fonte AnimeUnity). Gli elementi usano id Kitsu, così gli addon di streaming anime possono fornire i video.",
+    "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
   logo: "https://i.imgur.com/M8Th3g0.png",
   // Served as a static file by Express (see index.js). Root-relative so it
   // works on any host without bloating the manifest past the 8kb limit.
@@ -24,6 +25,18 @@ const manifest = {
       id: CATALOG_ID,
       name: "Ultime uscite doppiate ITA",
       extra: [{ name: "skip", isRequired: false }],
+    },
+    {
+      // Search-only catalog: `search` is required, so Stremio never shows this
+      // on the home board — it's queried only when the user runs a search.
+      // Backed by AnimeUnity's full dubbed archive (not just the latest feed).
+      type: "anime",
+      id: SEARCH_CATALOG_ID,
+      name: "Anime doppiati ITA",
+      extra: [
+        { name: "search", isRequired: true },
+        { name: "skip", isRequired: false },
+      ],
     },
   ],
   behaviorHints: {
@@ -39,15 +52,18 @@ const builder = new addonBuilder(manifest);
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
   debug(`→ catalog request  type=${type}  id=${id}`, extra);
 
-  if (id !== CATALOG_ID) {
-    return { metas: [] };
-  }
-
   // Stremio paginates by sending the number of items already loaded as `skip`.
-  // AnimeUnity's get-animes uses a record offset, so they line up 1:1.
   const skip = parseInt(extra && extra.skip, 10) || 0;
 
-  const metas = await getDubbedCatalog(skip);
+  let metas;
+  if (id === SEARCH_CATALOG_ID) {
+    const query = (extra && extra.search) || "";
+    metas = await searchDubbedCatalog(query, skip);
+  } else if (id === CATALOG_ID) {
+    metas = await getDubbedCatalog(skip);
+  } else {
+    return { metas: [] };
+  }
 
   debug(`← catalog response  ${metas.length} meta(s) (skip=${skip})`);
   return { metas };

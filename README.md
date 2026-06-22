@@ -1,21 +1,32 @@
 # Anime Doppiati ITA
 
-Addon per [Stremio](https://www.stremio.com/) che pubblica un **catalogo con le ultime uscite di anime doppiati in italiano**, usando come fonte [AnimeUnity](https://www.animeunity.so/).
+Addon per [Stremio](https://www.stremio.com/) che pubblica i **cataloghi di anime doppiati in italiano**, usando come fonte [AnimeUnity](https://www.animeunity.so/).
 
 ## Cosa fa
 
-L'addon aggiunge a Stremio un catalogo (`Ultime uscite doppiate ITA`) che elenca gli anime con doppiaggio italiano **ordinati per uscita dell'ultimo episodio**: il primo elemento è l'anime il cui episodio doppiato è uscito più di recente. Ogni elemento usa un **id Kitsu** (`kitsu:<id>`) e l'addon fornisce direttamente la **scheda con la lista episodi** (metadati da [Kitsu](https://kitsu.io/)).
+L'addon aggiunge a Stremio due cataloghi:
+
+- **`Ultime uscite doppiate ITA`** — elenca gli anime con doppiaggio italiano **ordinati per uscita dell'ultimo episodio**: il primo elemento è l'anime il cui episodio doppiato è uscito più di recente. È il catalogo mostrato nella home.
+- **`Anime doppiati ITA` (solo ricerca)** — un catalogo **globale** che permette di cercare fra **tutti** gli anime doppiati ITA presenti sull'archivio di AnimeUnity (non solo le ultime uscite). Non compare nella home: viene interrogato **solo quando fai una ricerca** dalla barra di Stremio.
+
+Ogni elemento usa un **id Kitsu** (`kitsu:<id>`) e l'addon fornisce direttamente la **scheda con la lista episodi** (metadati da [Kitsu](https://kitsu.io/)).
 
 L'addon **non riproduce video**: per le **fonti/streaming** serve un addon di streaming anime (vedi sotto). La scheda e gli episodi, invece, vengono caricati dall'addon stesso, senza dipendere da Anime Kitsu.
 
 ### Come funziona (flusso)
 
-**Catalogo:**
+**Catalogo home (ultime uscite):**
 
 1. Scorre il feed "ultimi episodi" di AnimeUnity (paginatore embeddato in `<layout-items>` sulla home, via `?page=N`), che è ordinato per data di uscita degli episodi.
 2. Tiene solo gli episodi **doppiati** (`anime.dub === 1`) e deduplica per anime, mantenendo la prima occorrenza (la più recente): così l'ordine riflette quale anime ha avuto l'ultimo episodio doppiato per ultimo.
 3. Per ogni anime ricava l'id [Kitsu](https://kitsu.io/) tramite il suo `anilist_id` / `mal_id` (endpoint `mappings` di Kitsu, con cache).
 4. Restituisce a Stremio le anteprime del catalogo con id `kitsu:<id>`, poster, trama e voto. Il catalogo assemblato è in cache 10 minuti.
+
+**Catalogo ricerca (archivio globale):**
+
+1. Recupera dalla home il token CSRF e i cookie di sessione (l'endpoint dell'archivio è protetto da CSRF), tenuti in cache 30 minuti.
+2. Interroga l'endpoint `POST /archivio/get-animes` con filtro `dubbed: true` e il termine cercato, paginando per `offset` (fino a un tetto di pagine per query).
+3. Mappa i risultati su id Kitsu e li restituisce come anteprime, esattamente come il catalogo home. I risultati sono in cache 10 minuti per query.
 
 **Scheda (meta):** all'apertura di un elemento, l'addon costruisce la scheda dall'API di Kitsu (dettaglio anime + lista episodi). Gli episodi usano video id nel formato `kitsu:<id>:<episodio>`, lo stesso che si aspettano gli addon di streaming anime, così possono agganciare le fonti.
 
@@ -99,8 +110,8 @@ DEBUG=1 node index.js
 ## Architettura
 
 - **[index.js](index.js)** — Server [Express](https://expressjs.com/) che monta il router dell'addon SDK, serve gli asset statici (logo e sfondo) da [assets/](assets/) e personalizza la pagina di landing/installazione.
-- **[addon.js](addon.js)** — Definisce il `manifest` (catalogo, tipi) e i gestori `catalog` e `meta` che rispondono alle richieste di Stremio.
-- **[services/animeunity.js](services/animeunity.js)** — Integrazione con AnimeUnity: lettura del feed "ultimi episodi", filtro dei doppiati e deduplica per anime, mapping verso gli id Kitsu e cache del catalogo.
+- **[addon.js](addon.js)** — Definisce il `manifest` (i due cataloghi, tipi) e i gestori `catalog` e `meta` che rispondono alle richieste di Stremio. Il gestore `catalog` distingue fra catalogo home e catalogo ricerca (`search` obbligatorio, così non compare nella home).
+- **[services/animeunity.js](services/animeunity.js)** — Integrazione con AnimeUnity: lettura del feed "ultimi episodi", ricerca nell'archivio doppiato (endpoint `archivio/get-animes` con handshake CSRF), filtro dei doppiati e deduplica per anime, mapping verso gli id Kitsu e cache di cataloghi e ricerche.
 - **[services/kitsu.js](services/kitsu.js)** — Costruzione della scheda (meta) dall'API Kitsu: dettaglio anime, generi, lista episodi con video id `kitsu:<id>:<episodio>`, con cache.
 - **[debug.js](debug.js)** — Piccola utility di logging condizionata dalla variabile `DEBUG`.
 
