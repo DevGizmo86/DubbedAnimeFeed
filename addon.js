@@ -1,14 +1,19 @@
 const { addonBuilder } = require("stremio-addon-sdk");
-const { getDubbedCatalog, searchDubbedCatalog } = require("./services/animeunity");
+const {
+  getDubbedCatalog,
+  searchDubbedCatalog,
+  getTopDubbedCatalog,
+} = require("./services/animeunity");
 const { getKitsuMeta } = require("./services/kitsu");
 const debug = require("./debug");
 
 const CATALOG_ID = "au-dubbed-latest";
 const SEARCH_CATALOG_ID = "au-dubbed-search";
+const TOP_CATALOG_ID = "mal-top-dubbed";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.1.0",
+  version: "1.2.0",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -24,6 +29,14 @@ const manifest = {
       type: "anime",
       id: CATALOG_ID,
       name: "Ultime uscite doppiate ITA",
+      extra: [{ name: "skip", isRequired: false }],
+    },
+    {
+      // Home board catalog: MyAnimeList's top ranking filtered to the anime
+      // that are available dubbed in Italian on AnimeUnity, in MAL rank order.
+      type: "anime",
+      id: TOP_CATALOG_ID,
+      name: "Top anime doppiati ITA",
       extra: [{ name: "skip", isRequired: false }],
     },
     {
@@ -59,6 +72,8 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
   if (id === SEARCH_CATALOG_ID) {
     const query = (extra && extra.search) || "";
     metas = await searchDubbedCatalog(query, skip);
+  } else if (id === TOP_CATALOG_ID) {
+    metas = await getTopDubbedCatalog(skip);
   } else if (id === CATALOG_ID) {
     metas = await getDubbedCatalog(skip);
   } else {

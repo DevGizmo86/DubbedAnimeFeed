@@ -3,6 +3,7 @@ const express = require("express");
 const { getRouter } = require("stremio-addon-sdk");
 const landingTemplate = require("stremio-addon-sdk/src/landingTemplate");
 const addonInterface = require("./addon");
+const { getTopDubbedCatalog } = require("./services/animeunity");
 
 const PORT = process.env.PORT || 7000;
 
@@ -84,4 +85,12 @@ app.get("/configure", sendLanding);
 app.listen(PORT, () => {
   console.log(`Addon attivo su http://localhost:${PORT}`);
   console.log(`Configura/installa su Stremio: http://localhost:${PORT}/configure`);
+
+  // Warm the "Top anime doppiati ITA" cache in the background: building it cold
+  // walks the full dubbed archive + the MAL top list, which is too slow to do
+  // inside the first catalog request. Errors here are non-fatal (it just
+  // rebuilds lazily on the first request instead).
+  getTopDubbedCatalog(0).catch((err) =>
+    console.error("Pre-build top catalog fallito:", err.message)
+  );
 });

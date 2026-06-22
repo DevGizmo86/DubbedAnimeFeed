@@ -4,9 +4,10 @@ Addon per [Stremio](https://www.stremio.com/) che pubblica i **cataloghi di anim
 
 ## Cosa fa
 
-L'addon aggiunge a Stremio due cataloghi:
+L'addon aggiunge a Stremio tre cataloghi:
 
-- **`Ultime uscite doppiate ITA`** — elenca gli anime con doppiaggio italiano **ordinati per uscita dell'ultimo episodio**: il primo elemento è l'anime il cui episodio doppiato è uscito più di recente. È il catalogo mostrato nella home.
+- **`Ultime uscite doppiate ITA`** — elenca gli anime con doppiaggio italiano **ordinati per uscita dell'ultimo episodio**: il primo elemento è l'anime il cui episodio doppiato è uscito più di recente. È mostrato nella home.
+- **`Top anime doppiati ITA`** — la **classifica top di [MyAnimeList](https://myanimelist.net/topanime.php)** filtrata ai soli titoli **disponibili doppiati ITA** su AnimeUnity, mantenendo l'ordine di ranking MAL. È mostrato nella home.
 - **`Anime doppiati ITA` (solo ricerca)** — un catalogo **globale** che permette di cercare fra **tutti** gli anime doppiati ITA presenti sull'archivio di AnimeUnity (non solo le ultime uscite). Non compare nella home: viene interrogato **solo quando fai una ricerca** dalla barra di Stremio.
 
 Ogni elemento usa un **id Kitsu** (`kitsu:<id>`) e l'addon fornisce direttamente la **scheda con la lista episodi** (metadati da [Kitsu](https://kitsu.io/)).
@@ -21,6 +22,12 @@ L'addon **non riproduce video**: per le **fonti/streaming** serve un addon di st
 2. Tiene solo gli episodi **doppiati** (`anime.dub === 1`) e deduplica per anime, mantenendo la prima occorrenza (la più recente): così l'ordine riflette quale anime ha avuto l'ultimo episodio doppiato per ultimo.
 3. Per ogni anime ricava l'id [Kitsu](https://kitsu.io/) tramite il suo `anilist_id` / `mal_id` (endpoint `mappings` di Kitsu, con cache).
 4. Restituisce a Stremio le anteprime del catalogo con id `kitsu:<id>`, poster, trama e voto. Il catalogo assemblato è in cache 10 minuti.
+
+**Catalogo top (classifica MAL ∩ doppiati):**
+
+1. Costruisce una sola volta l'**indice dell'intero archivio doppiato** di AnimeUnity (endpoint `archivio/get-animes`, query vuota) chiave `mal_id`, in cache 12 ore.
+2. Scarica la **classifica top di MyAnimeList** via [Jikan](https://jikan.moe/) (`/top/anime`), in ordine di ranking.
+3. Tiene i titoli MAL presenti nell'indice doppiato (in ordine di ranking), li mappa su id Kitsu e li restituisce come anteprime. Il catalogo è in cache 6 ore e viene pre-costruito all'avvio.
 
 **Catalogo ricerca (archivio globale):**
 
@@ -110,8 +117,9 @@ DEBUG=1 node index.js
 ## Architettura
 
 - **[index.js](index.js)** — Server [Express](https://expressjs.com/) che monta il router dell'addon SDK, serve gli asset statici (logo e sfondo) da [assets/](assets/) e personalizza la pagina di landing/installazione.
-- **[addon.js](addon.js)** — Definisce il `manifest` (i due cataloghi, tipi) e i gestori `catalog` e `meta` che rispondono alle richieste di Stremio. Il gestore `catalog` distingue fra catalogo home e catalogo ricerca (`search` obbligatorio, così non compare nella home).
-- **[services/animeunity.js](services/animeunity.js)** — Integrazione con AnimeUnity: lettura del feed "ultimi episodi", ricerca nell'archivio doppiato (endpoint `archivio/get-animes` con handshake CSRF), filtro dei doppiati e deduplica per anime, mapping verso gli id Kitsu e cache di cataloghi e ricerche.
+- **[addon.js](addon.js)** — Definisce il `manifest` (i tre cataloghi, tipi) e i gestori `catalog` e `meta` che rispondono alle richieste di Stremio. Il gestore `catalog` distingue fra catalogo ultime uscite, top e ricerca (`search` obbligatorio, così quest'ultimo non compare nella home).
+- **[services/animeunity.js](services/animeunity.js)** — Integrazione con AnimeUnity: lettura del feed "ultimi episodi", ricerca nell'archivio doppiato (endpoint `archivio/get-animes` con handshake CSRF), indice dell'archivio doppiato per `mal_id` (per il catalogo top), filtro dei doppiati e deduplica per anime, mapping verso gli id Kitsu e cache di cataloghi e ricerche.
+- **[services/mal.js](services/mal.js)** — Recupera la classifica top di MyAnimeList tramite l'API Jikan (`/top/anime`), con gestione del rate limit e cache.
 - **[services/kitsu.js](services/kitsu.js)** — Costruzione della scheda (meta) dall'API Kitsu: dettaglio anime, generi, lista episodi con video id `kitsu:<id>:<episodio>`, con cache.
 - **[debug.js](debug.js)** — Piccola utility di logging condizionata dalla variabile `DEBUG`.
 

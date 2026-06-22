@@ -1,5 +1,6 @@
 const fetch = require("node-fetch");
 const debug = require("../debug");
+const { getTopAnime } = require("./mal");
 
 const AU_BASE = "https://www.animeunity.so";
 const KITSU_API = "https://kitsu.io/api/edge";
@@ -30,6 +31,19 @@ const searchCache = new Map(); // normalizedQuery → { metas, builtAt }
 const SEARCH_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const SEARCH_API_PAGE = 30; // archivio/get-animes returns up to 30 records/page
 const MAX_SEARCH_PAGES = 6; // cap work per query (~180 results)
+
+// "Top anime doppiati ITA" catalog: the MyAnimeList top ranking intersected
+// with AnimeUnity's full dubbed archive. We walk the whole dubbed archive once
+// to build an index keyed by mal_id, then keep the MAL-top entries that appear
+// in it (preserving MAL rank order).
+const ARCHIVE_PAGE_LIMIT = 60; // ~1800 records: covers the full dubbed archive
+const MAX_TOP_MAL_PAGES = 20; // scan up to MAL top ~500 for dubbed matches
+const TARGET_TOP_ANIME = 100; // stop once we've collected this many dubbed hits
+// The dubbed archive changes slowly; cache the index for a long while.
+let dubbedIndexCache = null; // { index: Map<malId, record>, builtAt }
+const DUBBED_INDEX_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+let topCatalogCache = null; // { metas, builtAt }
+const TOP_CATALOG_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 // The archivio search endpoint is CSRF-protected: every request needs the
 // csrf-token from the homepage <meta> plus the XSRF-TOKEN/session cookies it
@@ -310,4 +324,71 @@ async function searchDubbedCatalog(query, skip) {
   return all.slice(start, start + CATALOG_PAGE_SIZE);
 }
 
-module.exports = { getDubbedCatalog, searchDubbedCatalog };
+// Walk AnimeUnity's full dubbed archive (empty query) and index every record
+// by its MyAnimeList id, so we can quickly tell whether a MAL-top anime is
+// available dubbed. Cached for DUBBED_INDEX_TTL_MS.
+async function buildDubbedIndex() {
+  if (dubbedIndexCache && Date.now() - dubbedIndexCache.builtAt < DUBBED_INDEX_TTL_MS) {
+    return dubbedIndexCache.index;
+  }
+
+  const index = new Map();
+  let offset = 0;
+  for (let page = 0; page < ARCHIVE_PAGE_LIMIT; page++) {
+    let records;
+    try {
+      records = await fetchSearchPage("", offset);
+    } catch (err) {
+      debug(`AnimeUnity: stopping archive walk at offset ${offset}: ${err.message}`);
+      break;
+    }
+    if (records.length === 0) break;
+    offset += records.length;
+    for (const r of records) {
+      if (r.mal_id != null && !index.has(String(r.mal_id))) {
+        index.set(String(r.mal_id), r);
+      }
+    }
+    if (records.length < SEARCH_API_PAGE) break; // last page
+  }
+
+  dubbedIndexCache = { index, builtAt: Date.now() };
+  debug(`buildDubbedIndex: ${index.size} dubbed anime indexed by mal_id`);
+  return index;
+}
+
+// Build the "Top anime doppiati ITA" catalog: MyAnimeList's top ranking kept
+// only where the anime is dubbed on AnimeUnity, preserving MAL rank order, then
+// mapped to Kitsu metas. Cached for TOP_CATALOG_TTL_MS.
+async function buildTopDubbedCatalog() {
+  if (topCatalogCache && Date.now() - topCatalogCache.builtAt < TOP_CATALOG_TTL_MS) {
+    return topCatalogCache.metas;
+  }
+
+  const index = await buildDubbedIndex();
+  const top = await getTopAnime(MAX_TOP_MAL_PAGES);
+
+  const matched = [];
+  const seen = new Set();
+  for (const entry of top) {
+    const record = index.get(String(entry.mal_id));
+    if (!record || seen.has(record.id)) continue;
+    seen.add(record.id);
+    matched.push(record);
+    if (matched.length >= TARGET_TOP_ANIME) break;
+  }
+
+  debug(`buildTopDubbedCatalog: ${matched.length} MAL-top anime are dubbed`);
+  const metas = await recordsToMetas(matched);
+  topCatalogCache = { metas, builtAt: Date.now() };
+  return metas;
+}
+
+// Return one page of the top-dubbed catalog. Stremio paginates via `skip`.
+async function getTopDubbedCatalog(skip) {
+  const all = await buildTopDubbedCatalog();
+  const start = skip || 0;
+  return all.slice(start, start + CATALOG_PAGE_SIZE);
+}
+
+module.exports = { getDubbedCatalog, searchDubbedCatalog, getTopDubbedCatalog };
