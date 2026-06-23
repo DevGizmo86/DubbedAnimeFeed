@@ -19,7 +19,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.4.0",
+  version: "1.4.1",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -100,23 +100,26 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-builder.defineCatalogHandler(async ({ type, id, extra }) => {
+builder.defineCatalogHandler(async ({ type, id, extra, config }) => {
   debug(`→ catalog request  type=${type}  id=${id}`, extra);
 
   // Stremio paginates by sending the number of items already loaded as `skip`.
   const skip = parseInt(extra && extra.skip, 10) || 0;
+  // TMDB key (config or env): when present, catalog titles are localized to
+  // Italian via TMDB, since AnimeUnity's `title_it` is null for most anime.
+  const tmdbKey = (config && config.tmdbKey) || process.env.TMDB_API_KEY || null;
 
   let metas;
   if (id === SEARCH_SERIES_ID || id === SEARCH_MOVIES_ID) {
     const query = (extra && extra.search) || "";
     const kind = id === SEARCH_MOVIES_ID ? "movie" : "series";
-    metas = await searchDubbedCatalog(query, kind, skip);
+    metas = await searchDubbedCatalog(query, kind, skip, tmdbKey);
   } else if (id === TOP_SERIES_ID || id === TOP_MOVIES_ID) {
     const kind = id === TOP_MOVIES_ID ? "movie" : "series";
-    metas = await getTopDubbedCatalog(kind, skip);
+    metas = await getTopDubbedCatalog(kind, skip, tmdbKey);
   } else if (id === LATEST_SERIES_ID || id === LATEST_MOVIES_ID) {
     const kind = id === LATEST_MOVIES_ID ? "movie" : "series";
-    metas = await getDubbedCatalog(kind, skip);
+    metas = await getDubbedCatalog(kind, skip, tmdbKey);
   } else {
     return { metas: [] };
   }

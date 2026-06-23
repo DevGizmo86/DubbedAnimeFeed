@@ -1,6 +1,7 @@
 const fetch = require("node-fetch");
 const debug = require("../debug");
 const { getTopAnime } = require("./mal");
+const tmdb = require("./tmdb");
 
 const AU_BASE = "https://www.animeunity.so";
 const KITSU_API = "https://kitsu.io/api/edge";
@@ -214,6 +215,15 @@ function getItalianMeta(kitsuId) {
   return italianMetaCache.get(String(kitsuId)) || null;
 }
 
+// What TMDB needs to localize a catalog preview (title + year + kind), keyed by
+// kitsu id. Used to fetch Italian titles for the home/search catalogs, whose
+// AnimeUnity `title_it` is null for most anime.
+const tmdbInfoCache = new Map(); // kitsuId → { isMovie, titles, year }
+
+function stripIta(t) {
+  return (t || "").replace(/\s*\(ITA\)\s*$/i, "").trim();
+}
+
 // AnimeUnity tags each anime with a `type` ("TV", "Movie", "OVA", "ONA",
 // "Special"). We treat "TV" as a series and everything else as a movie.
 function isSeries(record) {
@@ -242,6 +252,12 @@ async function recordsToMetas(records) {
       // Remember the Italian title/plot so the meta handler (kitsu id only) can
       // show Italian text instead of Kitsu's English synopsis.
       italianMetaCache.set(String(kitsuId), { name, description });
+      // Remember what TMDB needs to localize this preview's title later.
+      tmdbInfoCache.set(String(kitsuId), {
+        isMovie: !isSeries(a),
+        titles: [stripIta(a.title_eng), stripIta(a.title)].filter(Boolean),
+        year: a.date ? String(a.date).slice(0, 4) : undefined,
+      });
       return {
         id: `kitsu:${kitsuId}`,
         type: "anime",
@@ -256,6 +272,34 @@ async function recordsToMetas(records) {
     })
   );
   return previews.filter(Boolean);
+}
+
+// Localize one catalog page's titles/descriptions via TMDB (Italian), when a key
+// is provided. Runs only on the sliced page (≤ CATALOG_PAGE_SIZE items) and
+// TMDB results are cached by id, so the base catalog cache stays key-independent
+// and isn't poisoned by a keyless warm-up. Items keep their AnimeUnity text when
+// TMDB has no match.
+async function localizePage(metas, tmdbKey) {
+  if (!tmdbKey) return metas;
+  return Promise.all(
+    metas.map(async (m) => {
+      const info = tmdbInfoCache.get(m.id.slice("kitsu:".length));
+      if (!info) return m;
+      try {
+        const it = await tmdb.getItalianBasic(tmdbKey, info);
+        if (it && (it.name || it.description)) {
+          return {
+            ...m,
+            name: it.name || m.name,
+            description: it.description || m.description,
+          };
+        }
+      } catch (err) {
+        debug(`TMDB localize ${m.id} failed: ${err.message}`);
+      }
+      return m;
+    })
+  );
 }
 
 // Distinct dubbed anime from the feed (raw records, ordered by latest episode),
@@ -286,10 +330,10 @@ async function buildCatalog(kind) {
 
 // Return one catalog page. Stremio paginates by sending `skip` (items already
 // loaded); we slice the assembled, ordered list accordingly.
-async function getDubbedCatalog(kind, skip) {
+async function getDubbedCatalog(kind, skip, tmdbKey) {
   const all = await buildCatalog(kind);
   const start = skip || 0;
-  return all.slice(start, start + CATALOG_PAGE_SIZE);
+  return localizePage(all.slice(start, start + CATALOG_PAGE_SIZE), tmdbKey);
 }
 
 // Fetch (and cache) the CSRF token + cookies required to call the archivio
@@ -400,10 +444,10 @@ async function buildSearchResults(query, kind) {
 
 // Return one page of search results. Like the feed catalog, Stremio paginates
 // by sending `skip` (items already loaded); we slice the assembled list.
-async function searchDubbedCatalog(query, kind, skip) {
+async function searchDubbedCatalog(query, kind, skip, tmdbKey) {
   const all = await buildSearchResults(query, kind);
   const start = skip || 0;
-  return all.slice(start, start + CATALOG_PAGE_SIZE);
+  return localizePage(all.slice(start, start + CATALOG_PAGE_SIZE), tmdbKey);
 }
 
 // Walk AnimeUnity's full dubbed archive (empty query) and index every record
@@ -479,10 +523,10 @@ async function buildTopDubbedCatalog(kind) {
 }
 
 // Return one page of the top-dubbed catalog. Stremio paginates via `skip`.
-async function getTopDubbedCatalog(kind, skip) {
+async function getTopDubbedCatalog(kind, skip, tmdbKey) {
   const all = await buildTopDubbedCatalog(kind);
   const start = skip || 0;
-  return all.slice(start, start + CATALOG_PAGE_SIZE);
+  return localizePage(all.slice(start, start + CATALOG_PAGE_SIZE), tmdbKey);
 }
 
 module.exports = {

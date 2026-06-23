@@ -135,6 +135,18 @@ async function getEpisodes(key, tvId, seasons) {
   return list;
 }
 
+// Lightweight lookup for catalog previews: Italian title + synopsis via a
+// title+year search only (no TVDB mapping, no episode fetch), so it stays cheap
+// enough to run across a whole catalog page. Returns null when unmatched.
+async function getItalianBasic(key, { isMovie, titles, year }) {
+  if (!key) return null;
+  const tmdbId = await searchId(key, isMovie, titles || [], year);
+  if (!tmdbId) return null;
+  const detail = await getDetail(key, isMovie, tmdbId);
+  if (!detail) return null;
+  return { name: detail.name, description: detail.description };
+}
+
 // Resolve an anime to TMDB and return its Italian metadata, or null when no key
 // is provided or no match is found. `tvdbId` (series only) enables the exact
 // mapping; otherwise we fall back to a title+year search.
@@ -153,4 +165,4 @@ async function getItalian(key, { isMovie, tvdbId, titles, year }) {
   return { name: detail.name, description: detail.description, episodes };
 }
 
-module.exports = { getItalian };
+module.exports = { getItalian, getItalianBasic };
