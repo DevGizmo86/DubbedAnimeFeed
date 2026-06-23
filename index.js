@@ -90,7 +90,7 @@ app.listen(PORT, () => {
   // walks the full dubbed archive + the MAL top list, which is too slow to do
   // inside the first catalog request. Errors here are non-fatal (it just
   // rebuilds lazily on the first request instead).
-  getTopDubbedCatalog(0).catch((err) =>
+  getTopDubbedCatalog("series", 0).catch((err) =>
     console.error("Pre-build top catalog fallito:", err.message)
   );
 });

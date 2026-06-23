@@ -7,13 +7,19 @@ const {
 const { getKitsuMeta } = require("./services/kitsu");
 const debug = require("./debug");
 
-const CATALOG_ID = "au-dubbed-latest";
-const SEARCH_CATALOG_ID = "au-dubbed-search";
-const TOP_CATALOG_ID = "mal-top-dubbed";
+// Latest dubbed releases, split into series and movies.
+const LATEST_SERIES_ID = "au-dubbed-latest-series";
+const LATEST_MOVIES_ID = "au-dubbed-latest-movies";
+// MAL top ranking ∩ dubbed archive, split into series and movies.
+const TOP_SERIES_ID = "mal-top-dubbed-series";
+const TOP_MOVIES_ID = "mal-top-dubbed-movies";
+// Search-only catalogs over the full dubbed archive, split into series/movies.
+const SEARCH_SERIES_ID = "au-dubbed-search-series";
+const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.2.0",
+  version: "1.3.0",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -27,16 +33,28 @@ const manifest = {
   catalogs: [
     {
       type: "anime",
-      id: CATALOG_ID,
-      name: "Ultime uscite doppiate ITA",
+      id: LATEST_SERIES_ID,
+      name: "Ultime serie doppiate ITA",
+      extra: [{ name: "skip", isRequired: false }],
+    },
+    {
+      type: "anime",
+      id: LATEST_MOVIES_ID,
+      name: "Ultimi film doppiati ITA",
       extra: [{ name: "skip", isRequired: false }],
     },
     {
       // Home board catalog: MyAnimeList's top ranking filtered to the anime
       // that are available dubbed in Italian on AnimeUnity, in MAL rank order.
       type: "anime",
-      id: TOP_CATALOG_ID,
-      name: "Top anime doppiati ITA",
+      id: TOP_SERIES_ID,
+      name: "Top serie anime ITA",
+      extra: [{ name: "skip", isRequired: false }],
+    },
+    {
+      type: "anime",
+      id: TOP_MOVIES_ID,
+      name: "Top film anime ITA",
       extra: [{ name: "skip", isRequired: false }],
     },
     {
@@ -44,8 +62,17 @@ const manifest = {
       // on the home board — it's queried only when the user runs a search.
       // Backed by AnimeUnity's full dubbed archive (not just the latest feed).
       type: "anime",
-      id: SEARCH_CATALOG_ID,
-      name: "Anime doppiati ITA",
+      id: SEARCH_SERIES_ID,
+      name: "Serie anime doppiate ITA",
+      extra: [
+        { name: "search", isRequired: true },
+        { name: "skip", isRequired: false },
+      ],
+    },
+    {
+      type: "anime",
+      id: SEARCH_MOVIES_ID,
+      name: "Film anime doppiati ITA",
       extra: [
         { name: "search", isRequired: true },
         { name: "skip", isRequired: false },
@@ -69,13 +96,16 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
   const skip = parseInt(extra && extra.skip, 10) || 0;
 
   let metas;
-  if (id === SEARCH_CATALOG_ID) {
+  if (id === SEARCH_SERIES_ID || id === SEARCH_MOVIES_ID) {
     const query = (extra && extra.search) || "";
-    metas = await searchDubbedCatalog(query, skip);
-  } else if (id === TOP_CATALOG_ID) {
-    metas = await getTopDubbedCatalog(skip);
-  } else if (id === CATALOG_ID) {
-    metas = await getDubbedCatalog(skip);
+    const kind = id === SEARCH_MOVIES_ID ? "movie" : "series";
+    metas = await searchDubbedCatalog(query, kind, skip);
+  } else if (id === TOP_SERIES_ID || id === TOP_MOVIES_ID) {
+    const kind = id === TOP_MOVIES_ID ? "movie" : "series";
+    metas = await getTopDubbedCatalog(kind, skip);
+  } else if (id === LATEST_SERIES_ID || id === LATEST_MOVIES_ID) {
+    const kind = id === LATEST_MOVIES_ID ? "movie" : "series";
+    metas = await getDubbedCatalog(kind, skip);
   } else {
     return { metas: [] };
   }

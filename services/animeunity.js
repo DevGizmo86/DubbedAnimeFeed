@@ -16,10 +16,12 @@ const CATALOG_PAGE_SIZE = 50; // anime returned per Stremio catalog page
 const MAX_FEED_PAGES = 20;
 const TARGET_ANIME = 60;
 
-// The assembled catalog (dubbed anime ordered by latest episode, mapped to
-// Kitsu ids) is cached so scrolling/pagination doesn't refetch the feed.
-let catalogCache = null; // { metas, builtAt }
+// Distinct dubbed anime from the latest-episodes feed (raw records, before the
+// Kitsu mapping) are cached so the series and movie catalogs share one walk.
+let feedRecordsCache = null; // { records, builtAt }
 const CATALOG_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// Mapped Stremio metas split by kind ("series" vs "movie"), cached separately.
+const feedMetaCache = { series: null, movie: null }; // kind → { metas, builtAt }
 
 // Kitsu mappings are static, so cache them for the whole process lifetime.
 // Key: "anilist/anime:889" or "myanimelist/anime:889" → kitsu id (or null).
@@ -27,7 +29,10 @@ const kitsuCache = new Map();
 
 // Search results (the "all dubbed anime" search-only catalog) are cached per
 // normalized query, so paging through results doesn't re-hit AnimeUnity.
-const searchCache = new Map(); // normalizedQuery → { metas, builtAt }
+// Raw records are cached per query (shared by both kinds); mapped metas are
+// cached per "kind:query".
+const searchRecordsCache = new Map(); // normalizedQuery → { records, builtAt }
+const searchMetaCache = new Map(); // "kind:normalizedQuery" → { metas, builtAt }
 const SEARCH_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const SEARCH_API_PAGE = 30; // archivio/get-animes returns up to 30 records/page
 const MAX_SEARCH_PAGES = 6; // cap work per query (~180 results)
@@ -42,7 +47,10 @@ const TARGET_TOP_ANIME = 100; // stop once we've collected this many dubbed hits
 // The dubbed archive changes slowly; cache the index for a long while.
 let dubbedIndexCache = null; // { index: Map<malId, record>, builtAt }
 const DUBBED_INDEX_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
-let topCatalogCache = null; // { metas, builtAt }
+// Matched MAL-top dubbed records are cached once (shared by both kinds); mapped
+// metas are cached per kind.
+let topRecordsCache = null; // { records, builtAt }
+const topMetaCache = { series: null, movie: null }; // kind → { metas, builtAt }
 const TOP_CATALOG_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 // The archivio search endpoint is CSRF-protected: every request needs the
@@ -174,6 +182,18 @@ function cleanTitle(anime) {
   return raw.replace(/\s*\(ITA\)\s*$/i, "").trim();
 }
 
+// AnimeUnity tags each anime with a `type` ("TV", "Movie", "OVA", "ONA",
+// "Special"). We treat "TV" as a series and everything else as a movie.
+function isSeries(record) {
+  return record && record.type === "TV";
+}
+
+function filterByKind(records, kind) {
+  if (kind === "series") return records.filter(isSeries);
+  if (kind === "movie") return records.filter((r) => !isSeries(r));
+  return records;
+}
+
 // Turn AnimeUnity anime records into Stremio meta previews with Kitsu ids.
 // Anime without a Kitsu mapping are dropped (no ecosystem id → other addons
 // couldn't attach streams/meta to them anyway). Order is preserved.
@@ -201,24 +221,36 @@ async function recordsToMetas(records) {
   return previews.filter(Boolean);
 }
 
-// Build the full catalog: distinct dubbed anime (ordered by latest episode)
-// turned into Stremio meta previews with Kitsu ids. Cached for CATALOG_TTL_MS.
-async function buildCatalog() {
-  if (catalogCache && Date.now() - catalogCache.builtAt < CATALOG_TTL_MS) {
-    return catalogCache.metas;
+// Distinct dubbed anime from the feed (raw records, ordered by latest episode),
+// cached so the series and movie catalogs share a single feed walk.
+async function getFeedRecords() {
+  if (feedRecordsCache && Date.now() - feedRecordsCache.builtAt < CATALOG_TTL_MS) {
+    return feedRecordsCache.records;
   }
+  const records = await collectDubbedAnime();
+  feedRecordsCache = { records, builtAt: Date.now() };
+  return records;
+}
 
-  const anime = await collectDubbedAnime();
-  const metas = await recordsToMetas(anime);
-  catalogCache = { metas, builtAt: Date.now() };
-  debug(`buildCatalog: ${metas.length} kitsu meta(s) cached`);
+// Build the latest-dubbed catalog for one kind ("series" | "movie"): the feed
+// records filtered by kind, turned into Stremio meta previews with Kitsu ids.
+// Cached per kind for CATALOG_TTL_MS.
+async function buildCatalog(kind) {
+  const cached = feedMetaCache[kind];
+  if (cached && Date.now() - cached.builtAt < CATALOG_TTL_MS) {
+    return cached.metas;
+  }
+  const records = filterByKind(await getFeedRecords(), kind);
+  const metas = await recordsToMetas(records);
+  feedMetaCache[kind] = { metas, builtAt: Date.now() };
+  debug(`buildCatalog(${kind}): ${metas.length} kitsu meta(s) cached`);
   return metas;
 }
 
 // Return one catalog page. Stremio paginates by sending `skip` (items already
 // loaded); we slice the assembled, ordered list accordingly.
-async function getDubbedCatalog(skip) {
-  const all = await buildCatalog();
+async function getDubbedCatalog(kind, skip) {
+  const all = await buildCatalog(kind);
   const start = skip || 0;
   return all.slice(start, start + CATALOG_PAGE_SIZE);
 }
@@ -280,13 +312,13 @@ async function fetchSearchPage(query, offset) {
   return Array.isArray(json.records) ? json.records : [];
 }
 
-// Build the full set of dubbed anime matching `query`, mapped to Kitsu metas.
-// Walks the archivio pages (capped) and caches the result per query.
-async function buildSearchResults(query) {
+// Walk the archivio pages (capped) for `query` and return the raw dubbed
+// records. Cached per normalized query, shared by the series and movie catalogs.
+async function getSearchRecords(query) {
   const key = (query || "").trim().toLowerCase();
-  const cached = searchCache.get(key);
+  const cached = searchRecordsCache.get(key);
   if (cached && Date.now() - cached.builtAt < SEARCH_TTL_MS) {
-    return cached.metas;
+    return cached.records;
   }
 
   const records = [];
@@ -311,15 +343,28 @@ async function buildSearchResults(query) {
   }
 
   debug(`AnimeUnity: search "${key}" → ${records.length} dubbed record(s)`);
+  searchRecordsCache.set(key, { records, builtAt: Date.now() });
+  return records;
+}
+
+// Build the set of dubbed anime matching `query` for one kind ("series" |
+// "movie"), mapped to Kitsu metas. Cached per "kind:query".
+async function buildSearchResults(query, kind) {
+  const key = `${kind}:${(query || "").trim().toLowerCase()}`;
+  const cached = searchMetaCache.get(key);
+  if (cached && Date.now() - cached.builtAt < SEARCH_TTL_MS) {
+    return cached.metas;
+  }
+  const records = filterByKind(await getSearchRecords(query), kind);
   const metas = await recordsToMetas(records);
-  searchCache.set(key, { metas, builtAt: Date.now() });
+  searchMetaCache.set(key, { metas, builtAt: Date.now() });
   return metas;
 }
 
 // Return one page of search results. Like the feed catalog, Stremio paginates
 // by sending `skip` (items already loaded); we slice the assembled list.
-async function searchDubbedCatalog(query, skip) {
-  const all = await buildSearchResults(query);
+async function searchDubbedCatalog(query, kind, skip) {
+  const all = await buildSearchResults(query, kind);
   const start = skip || 0;
   return all.slice(start, start + CATALOG_PAGE_SIZE);
 }
@@ -357,12 +402,12 @@ async function buildDubbedIndex() {
   return index;
 }
 
-// Build the "Top anime doppiati ITA" catalog: MyAnimeList's top ranking kept
-// only where the anime is dubbed on AnimeUnity, preserving MAL rank order, then
-// mapped to Kitsu metas. Cached for TOP_CATALOG_TTL_MS.
-async function buildTopDubbedCatalog() {
-  if (topCatalogCache && Date.now() - topCatalogCache.builtAt < TOP_CATALOG_TTL_MS) {
-    return topCatalogCache.metas;
+// Match MyAnimeList's top ranking against the dubbed archive, preserving MAL
+// rank order, and return the matched raw records. Cached once and shared by the
+// series and movie top catalogs.
+async function getTopDubbedRecords() {
+  if (topRecordsCache && Date.now() - topRecordsCache.builtAt < TOP_CATALOG_TTL_MS) {
+    return topRecordsCache.records;
   }
 
   const index = await buildDubbedIndex();
@@ -378,15 +423,27 @@ async function buildTopDubbedCatalog() {
     if (matched.length >= TARGET_TOP_ANIME) break;
   }
 
-  debug(`buildTopDubbedCatalog: ${matched.length} MAL-top anime are dubbed`);
-  const metas = await recordsToMetas(matched);
-  topCatalogCache = { metas, builtAt: Date.now() };
+  debug(`getTopDubbedRecords: ${matched.length} MAL-top anime are dubbed`);
+  topRecordsCache = { records: matched, builtAt: Date.now() };
+  return matched;
+}
+
+// Build the "Top ... ITA" catalog for one kind ("series" | "movie"): the matched
+// MAL-top dubbed records filtered by kind, mapped to Kitsu metas. Cached per kind.
+async function buildTopDubbedCatalog(kind) {
+  const cached = topMetaCache[kind];
+  if (cached && Date.now() - cached.builtAt < TOP_CATALOG_TTL_MS) {
+    return cached.metas;
+  }
+  const records = filterByKind(await getTopDubbedRecords(), kind);
+  const metas = await recordsToMetas(records);
+  topMetaCache[kind] = { metas, builtAt: Date.now() };
   return metas;
 }
 
 // Return one page of the top-dubbed catalog. Stremio paginates via `skip`.
-async function getTopDubbedCatalog(skip) {
-  const all = await buildTopDubbedCatalog();
+async function getTopDubbedCatalog(kind, skip) {
+  const all = await buildTopDubbedCatalog(kind);
   const start = skip || 0;
   return all.slice(start, start + CATALOG_PAGE_SIZE);
 }
