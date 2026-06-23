@@ -19,7 +19,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.3.0",
+  version: "1.4.0",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -30,6 +30,17 @@ const manifest = {
   resources: ["catalog", "meta"],
   types: ["anime"],
   idPrefixes: ["kitsu:"],
+  // Optional user configuration: a TMDB API key. When provided, titles,
+  // synopses and episode names are fetched from TMDB in Italian; without it the
+  // addon still works, falling back to AnimeUnity's Italian text + Kitsu.
+  config: [
+    {
+      key: "tmdbKey",
+      type: "text",
+      title:
+        "Chiave API TMDB (opzionale) — per titoli, trame ed episodi in italiano",
+    },
+  ],
   catalogs: [
     {
       type: "anime",
@@ -82,7 +93,7 @@ const manifest = {
   behaviorHints: {
     adult: false,
     p2p: false,
-    configurable: false,
+    configurable: true,
     configurationRequired: false,
   },
 };
@@ -114,7 +125,7 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
   return { metas };
 });
 
-builder.defineMetaHandler(async ({ type, id }) => {
+builder.defineMetaHandler(async ({ type, id, config }) => {
   debug(`→ meta request  type=${type}  id=${id}`);
 
   // id is "kitsu:<numericId>" (our catalog items). Strip the prefix.
@@ -123,8 +134,12 @@ builder.defineMetaHandler(async ({ type, id }) => {
     return { meta: null };
   }
 
+  // TMDB key from the user's addon configuration, falling back to an env var
+  // for local development.
+  const tmdbKey = (config && config.tmdbKey) || process.env.TMDB_API_KEY || null;
+
   try {
-    const meta = await getKitsuMeta(kitsuId, type);
+    const meta = await getKitsuMeta(kitsuId, type, tmdbKey);
     debug(`← meta response  "${meta.name}"`);
     return { meta };
   } catch (err) {

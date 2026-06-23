@@ -1,5 +1,7 @@
 const fetch = require("node-fetch");
 const debug = require("../debug");
+const { getItalianMeta } = require("./animeunity");
+const tmdb = require("./tmdb");
 
 const KITSU_API = "https://kitsu.io/api/edge";
 const UA =
@@ -110,12 +112,76 @@ function buildVideos(kitsuId, total, realEpisodes) {
   return videos;
 }
 
+// TheTVDB series id for a kitsu anime (from Kitsu's mappings), which lets TMDB
+// resolve the show via an exact /find lookup. Cached per process; only fetched
+// when a TMDB key is in play and the title is a series.
+const tvdbCache = new Map(); // kitsuId → tvdbId | null
+async function getTvdbId(kitsuId) {
+  if (tvdbCache.has(kitsuId)) return tvdbCache.get(kitsuId);
+  let tvdbId = null;
+  try {
+    const json = await kitsuGet(`/anime/${kitsuId}/mappings`);
+    const m = (json.data || []).find(
+      (x) => x.attributes && x.attributes.externalSite === "thetvdb/series"
+    );
+    if (m) tvdbId = m.attributes.externalId;
+  } catch (err) {
+    debug(`Kitsu mappings ${kitsuId} failed: ${err.message}`);
+  }
+  tvdbCache.set(kitsuId, tvdbId);
+  return tvdbId;
+}
+
+// Overlay Italian title/synopsis/episode names on top of the (English) Kitsu
+// meta. Priority: TMDB (when a key is configured) → AnimeUnity → Kitsu. Applied
+// on every return — including cache hits — and cloned so the cached base meta
+// stays untouched. `info` carries the bits TMDB needs to resolve the anime.
+async function withItalian(base, info, kitsuId, tmdbKey) {
+  let tmdbIt = null;
+  if (tmdbKey) {
+    try {
+      const tvdbId = info.isMovie ? null : await getTvdbId(kitsuId);
+      tmdbIt = await tmdb.getItalian(tmdbKey, {
+        isMovie: info.isMovie,
+        tvdbId,
+        titles: info.titles,
+        year: info.year,
+      });
+    } catch (err) {
+      debug(`TMDB enrich ${kitsuId} failed: ${err.message}`);
+    }
+  }
+  const au = getItalianMeta(kitsuId); // AnimeUnity Italian fallback
+
+  const name = (tmdbIt && tmdbIt.name) || (au && au.name) || base.name;
+  const description =
+    (tmdbIt && tmdbIt.description) || (au && au.description) || base.description;
+  const epTitles = tmdbIt && tmdbIt.episodes && tmdbIt.episodes.length ? tmdbIt.episodes : null;
+
+  if (name === base.name && description === base.description && !epTitles) {
+    return base; // nothing localized — return the base meta untouched
+  }
+
+  const meta = { ...base, name, description };
+  // Overlay Italian episode titles/overviews by absolute order; keep the Kitsu
+  // value where TMDB has no matching entry.
+  if (epTitles && Array.isArray(base.videos)) {
+    meta.videos = base.videos.map((v, i) => {
+      const ep = epTitles[i];
+      if (!ep) return v;
+      return { ...v, title: ep.title || v.title, overview: ep.overview || v.overview };
+    });
+  }
+  return meta;
+}
+
 // Build a full Stremio meta object for a kitsu anime id. `type` is echoed back
-// from the request (our catalog uses "anime").
-async function getKitsuMeta(kitsuId, type) {
+// from the request (our catalog uses "anime"). `tmdbKey` (optional) enables the
+// richer Italian metadata from TMDB.
+async function getKitsuMeta(kitsuId, type, tmdbKey) {
   const cached = metaCache.get(kitsuId);
   if (cached && Date.now() - cached.builtAt < META_TTL_MS) {
-    return cached.meta;
+    return withItalian(cached.meta, cached.info, kitsuId, tmdbKey);
   }
 
   const json = await kitsuGet(`/anime/${kitsuId}?include=categories`);
@@ -154,9 +220,21 @@ async function getKitsuMeta(kitsuId, type) {
     meta.videos = buildVideos(kitsuId, total, realEpisodes);
   }
 
-  metaCache.set(kitsuId, { meta, builtAt: Date.now() });
+  // Bits TMDB needs to resolve this anime, stored so cache hits can enrich too.
+  const info = {
+    isMovie,
+    year: startYear,
+    titles: [
+      a.canonicalTitle,
+      a.titles && a.titles.en,
+      a.titles && a.titles.en_jp,
+      a.titles && a.titles.ja_jp,
+    ].filter(Boolean),
+  };
+
+  metaCache.set(kitsuId, { meta, info, builtAt: Date.now() });
   debug(`getKitsuMeta: ${kitsuId} "${meta.name}" videos=${meta.videos ? meta.videos.length : 0}`);
-  return meta;
+  return withItalian(meta, info, kitsuId, tmdbKey);
 }
 
 module.exports = { getKitsuMeta };

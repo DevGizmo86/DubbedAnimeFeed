@@ -175,11 +175,43 @@ async function resolveKitsuId(anime) {
   return null;
 }
 
-// title_eng often carries an "(ITA)" suffix from the dubbed entry; drop it for
-// display, the catalog row already says these are dubbed.
+// Prefer the Italian title; AnimeUnity is an Italian site so title_it is the
+// localized name. Titles often carry an "(ITA)" suffix from the dubbed entry;
+// drop it for display, the catalog row already says these are dubbed.
 function cleanTitle(anime) {
-  const raw = anime.title_eng || anime.title || anime.title_it || "Anime";
+  const raw = anime.title_it || anime.title_eng || anime.title || "Anime";
   return raw.replace(/\s*\(ITA\)\s*$/i, "").trim();
+}
+
+// AnimeUnity's `plot` is the Italian synopsis. Some entries prefix it with the
+// original/English title ("Attack on Titan (Shingeki no Kyojin) - …"); strip
+// that lead-in, but only when the plot actually starts with a known title
+// followed by a separator, so we never cut legitimate text.
+function cleanPlot(anime) {
+  const raw = anime && anime.plot;
+  if (!raw) return undefined;
+  const p = raw.trim();
+  const known = [anime.title_eng, anime.title, anime.title_it]
+    .filter(Boolean)
+    .map((t) => t.replace(/\s*\(ITA\)\s*$/i, "").trim())
+    .filter(Boolean);
+  for (const t of known) {
+    if (p.toLowerCase().startsWith(t.toLowerCase())) {
+      // Drop the title, an optional "(original title)", and a " - " separator.
+      const stripped = p.slice(t.length).replace(/^\s*(\([^)]*\))?\s*[-–—]\s+/, "");
+      if (stripped !== p.slice(t.length)) return stripped.trim();
+    }
+  }
+  return p;
+}
+
+// Italian title/plot from AnimeUnity, keyed by kitsu id, so the meta handler
+// (which only receives a kitsu id) can show Italian text instead of Kitsu's
+// English synopsis. Populated whenever we map records to metas.
+const italianMetaCache = new Map(); // kitsuId → { name, description }
+
+function getItalianMeta(kitsuId) {
+  return italianMetaCache.get(String(kitsuId)) || null;
 }
 
 // AnimeUnity tags each anime with a `type` ("TV", "Movie", "OVA", "ONA",
@@ -205,14 +237,19 @@ async function recordsToMetas(records) {
         debug(`No Kitsu mapping for "${cleanTitle(a)}" (au id ${a.id})`);
         return null;
       }
+      const name = cleanTitle(a);
+      const description = cleanPlot(a);
+      // Remember the Italian title/plot so the meta handler (kitsu id only) can
+      // show Italian text instead of Kitsu's English synopsis.
+      italianMetaCache.set(String(kitsuId), { name, description });
       return {
         id: `kitsu:${kitsuId}`,
         type: "anime",
-        name: cleanTitle(a),
+        name,
         poster: a.imageurl || undefined,
         posterShape: "poster",
         background: a.imageurl_cover || undefined,
-        description: a.plot || undefined,
+        description,
         releaseInfo: a.date || undefined,
         imdbRating: a.score || undefined,
       };
@@ -448,4 +485,9 @@ async function getTopDubbedCatalog(kind, skip) {
   return all.slice(start, start + CATALOG_PAGE_SIZE);
 }
 
-module.exports = { getDubbedCatalog, searchDubbedCatalog, getTopDubbedCatalog };
+module.exports = {
+  getDubbedCatalog,
+  searchDubbedCatalog,
+  getTopDubbedCatalog,
+  getItalianMeta,
+};

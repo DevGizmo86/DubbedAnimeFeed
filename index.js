@@ -1,5 +1,23 @@
+const fs = require("fs");
 const path = require("path");
 const express = require("express");
+
+// Minimal .env loader (no dependency): for local development, load KEY=VALUE
+// lines from a gitignored .env into process.env without overriding what's
+// already set. Lets `npm run dev` pick up TMDB_API_KEY locally.
+(function loadDotEnv() {
+  try {
+    const text = fs.readFileSync(path.join(__dirname, ".env"), "utf8");
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(/^\s*([\w.-]+)\s*=\s*(.*)\s*$/);
+      if (!m || line.trim().startsWith("#")) continue;
+      const val = m[2].replace(/^["']|["']$/g, "");
+      if (!(m[1] in process.env)) process.env[m[1]] = val;
+    }
+  } catch (_) {
+    /* no .env file — fine */
+  }
+})();
 const { getRouter } = require("stremio-addon-sdk");
 const landingTemplate = require("stremio-addon-sdk/src/landingTemplate");
 const addonInterface = require("./addon");
