@@ -21,7 +21,10 @@ const express = require("express");
 const { getRouter } = require("stremio-addon-sdk");
 const landingTemplate = require("stremio-addon-sdk/src/landingTemplate");
 const addonInterface = require("./addon");
-const { getTopDubbedCatalog } = require("./services/animeunity");
+const {
+  getTopDubbedCatalog,
+  getTopAiringDubbedCatalog,
+} = require("./services/animeunity");
 
 const PORT = process.env.PORT || 7000;
 
@@ -107,8 +110,12 @@ app.listen(PORT, () => {
   // Warm the "Top anime doppiati ITA" cache in the background: building it cold
   // walks the full dubbed archive + the MAL top list, which is too slow to do
   // inside the first catalog request. Errors here are non-fatal (it just
-  // rebuilds lazily on the first request instead).
-  getTopDubbedCatalog("series", 0, process.env.TMDB_API_KEY || null).catch((err) =>
-    console.error("Pre-build top catalog fallito:", err.message)
-  );
+  // rebuilds lazily on the first request instead). The airing catalog is warmed
+  // right after, so it reuses the dubbed-archive index instead of racing a
+  // second walk in parallel.
+  const tmdbKey = process.env.TMDB_API_KEY || null;
+  getTopDubbedCatalog("series", 0, tmdbKey)
+    .catch((err) => console.error("Pre-build top catalog fallito:", err.message))
+    .then(() => getTopAiringDubbedCatalog(0, tmdbKey))
+    .catch((err) => console.error("Pre-build airing catalog fallito:", err.message));
 });

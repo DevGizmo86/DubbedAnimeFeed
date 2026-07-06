@@ -3,6 +3,7 @@ const {
   getDubbedCatalog,
   searchDubbedCatalog,
   getTopDubbedCatalog,
+  getTopAiringDubbedCatalog,
 } = require("./services/animeunity");
 const { getKitsuMeta } = require("./services/kitsu");
 const debug = require("./debug");
@@ -13,13 +14,15 @@ const LATEST_MOVIES_ID = "au-dubbed-latest-movies";
 // MAL top ranking ∩ dubbed archive, split into series and movies.
 const TOP_SERIES_ID = "mal-top-dubbed-series";
 const TOP_MOVIES_ID = "mal-top-dubbed-movies";
+// MAL top *airing* ranking ∩ dubbed archive (home-only, single mixed row).
+const AIRING_ID = "mal-airing-dubbed";
 // Search-only catalogs over the full dubbed archive, split into series/movies.
 const SEARCH_SERIES_ID = "au-dubbed-search-series";
 const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.4.1",
+  version: "1.5.0",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -66,6 +69,16 @@ const manifest = {
       type: "anime",
       id: TOP_MOVIES_ID,
       name: "Top film anime ITA",
+      extra: [{ name: "skip", isRequired: false }],
+    },
+    {
+      // Home board catalog: MyAnimeList's top *airing* ranking
+      // (topanime.php?type=airing) filtered to the anime available dubbed in
+      // Italian on AnimeUnity, in MAL rank order. No `search` extra, so it
+      // only shows on the home board.
+      type: "anime",
+      id: AIRING_ID,
+      name: "Top anime in onda ITA",
       extra: [{ name: "skip", isRequired: false }],
     },
     {
@@ -117,6 +130,8 @@ builder.defineCatalogHandler(async ({ type, id, extra, config }) => {
   } else if (id === TOP_SERIES_ID || id === TOP_MOVIES_ID) {
     const kind = id === TOP_MOVIES_ID ? "movie" : "series";
     metas = await getTopDubbedCatalog(kind, skip, tmdbKey);
+  } else if (id === AIRING_ID) {
+    metas = await getTopAiringDubbedCatalog(skip, tmdbKey);
   } else if (id === LATEST_SERIES_ID || id === LATEST_MOVIES_ID) {
     const kind = id === LATEST_MOVIES_ID ? "movie" : "series";
     metas = await getDubbedCatalog(kind, skip, tmdbKey);

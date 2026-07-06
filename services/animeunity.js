@@ -54,6 +54,14 @@ let topRecordsCache = null; // { records, builtAt }
 const topMetaCache = { series: null, movie: null }; // kind → { metas, builtAt }
 const TOP_CATALOG_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+// "Top anime in onda ITA" catalog: MyAnimeList's top *airing* ranking
+// (topanime.php?type=airing) intersected with the dubbed archive. The airing
+// list is short (a few hundred anime), so we scan all of it; dubs lag behind
+// simulcasts, so only a handful match — one home row, no series/movie split.
+const MAX_AIRING_MAL_PAGES = 20;
+let airingRecordsCache = null; // { records, builtAt }
+let airingMetaCache = null; // { metas, builtAt }
+
 // The archivio search endpoint is CSRF-protected: every request needs the
 // csrf-token from the homepage <meta> plus the XSRF-TOKEN/session cookies it
 // hands out. Cache that handshake briefly and reuse it across searches.
@@ -529,9 +537,53 @@ async function getTopDubbedCatalog(kind, skip, tmdbKey) {
   return localizePage(all.slice(start, start + CATALOG_PAGE_SIZE), tmdbKey);
 }
 
+// Match MyAnimeList's top *airing* ranking against the dubbed archive,
+// preserving MAL rank order, and return the matched raw records.
+async function getTopAiringDubbedRecords() {
+  if (airingRecordsCache && Date.now() - airingRecordsCache.builtAt < TOP_CATALOG_TTL_MS) {
+    return airingRecordsCache.records;
+  }
+
+  const index = await buildDubbedIndex();
+  const top = await getTopAnime(MAX_AIRING_MAL_PAGES, "airing");
+
+  const matched = [];
+  const seen = new Set();
+  for (const entry of top) {
+    const record = index.get(String(entry.mal_id));
+    if (!record || seen.has(record.id)) continue;
+    seen.add(record.id);
+    matched.push(record);
+  }
+
+  debug(`getTopAiringDubbedRecords: ${matched.length} MAL-top airing anime are dubbed`);
+  airingRecordsCache = { records: matched, builtAt: Date.now() };
+  return matched;
+}
+
+// Build the "Top anime in onda ITA" catalog: matched airing dubbed records
+// mapped to Kitsu metas (both series and movies — the row is a single mix).
+async function buildTopAiringDubbedCatalog() {
+  if (airingMetaCache && Date.now() - airingMetaCache.builtAt < TOP_CATALOG_TTL_MS) {
+    return airingMetaCache.metas;
+  }
+  const records = await getTopAiringDubbedRecords();
+  const metas = await recordsToMetas(records);
+  airingMetaCache = { metas, builtAt: Date.now() };
+  return metas;
+}
+
+// Return one page of the top-airing-dubbed catalog. Stremio paginates via `skip`.
+async function getTopAiringDubbedCatalog(skip, tmdbKey) {
+  const all = await buildTopAiringDubbedCatalog();
+  const start = skip || 0;
+  return localizePage(all.slice(start, start + CATALOG_PAGE_SIZE), tmdbKey);
+}
+
 module.exports = {
   getDubbedCatalog,
   searchDubbedCatalog,
   getTopDubbedCatalog,
+  getTopAiringDubbedCatalog,
   getItalianMeta,
 };

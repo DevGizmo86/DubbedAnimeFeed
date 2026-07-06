@@ -14,15 +14,17 @@ const PAGE_SIZE = 25; // Jikan caps /top/anime at 25 records per page
 const REQUEST_DELAY_MS = 500;
 const RATE_LIMIT_BACKOFF_MS = 2000;
 
-// The MAL top ranking is stable enough to cache for a few hours.
-let topCache = null; // { list, builtAt }
+// The MAL top rankings are stable enough to cache for a few hours. Keyed by
+// Jikan filter ("" = overall ranking, "airing" = topanime.php?type=airing).
+const topCache = new Map(); // filter → { list, builtAt }
 const TOP_TTL_MS = 6 * 60 * 60 * 1000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchTopPage(page) {
-  const url = `${JIKAN_API}/top/anime?page=${page}&limit=${PAGE_SIZE}`;
-  debug(`MAL: top page ${page}`);
+async function fetchTopPage(page, filter) {
+  const filterParam = filter ? `&filter=${encodeURIComponent(filter)}` : "";
+  const url = `${JIKAN_API}/top/anime?page=${page}&limit=${PAGE_SIZE}${filterParam}`;
+  debug(`MAL: top page ${page}${filter ? ` (${filter})` : ""}`);
 
   // One retry on 429: Jikan's limiter is bursty, so a short pause usually clears
   // it without us giving up the rest of the ranking.
@@ -45,17 +47,19 @@ async function fetchTopPage(page) {
 }
 
 // Return the top `maxPages * 25` MyAnimeList anime in rank order, as lightweight
-// records ({ mal_id, title, rank }). Cached for TOP_TTL_MS.
-async function getTopAnime(maxPages) {
-  if (topCache && Date.now() - topCache.builtAt < TOP_TTL_MS) {
-    return topCache.list;
+// records ({ mal_id, title, rank }). `filter` selects the ranking: "" for the
+// overall top, "airing" for currently-airing anime. Cached for TOP_TTL_MS.
+async function getTopAnime(maxPages, filter = "") {
+  const cached = topCache.get(filter);
+  if (cached && Date.now() - cached.builtAt < TOP_TTL_MS) {
+    return cached.list;
   }
 
   const list = [];
   for (let page = 1; page <= maxPages; page++) {
     let data;
     try {
-      data = await fetchTopPage(page);
+      data = await fetchTopPage(page, filter);
     } catch (err) {
       debug(`MAL: stopping top walk at page ${page}: ${err.message}`);
       break;
@@ -68,8 +72,8 @@ async function getTopAnime(maxPages) {
     if (page < maxPages) await sleep(REQUEST_DELAY_MS);
   }
 
-  topCache = { list, builtAt: Date.now() };
-  debug(`MAL: cached top ${list.length} anime`);
+  topCache.set(filter, { list, builtAt: Date.now() });
+  debug(`MAL: cached top ${list.length} anime${filter ? ` (${filter})` : ""}`);
   return list;
 }
 
