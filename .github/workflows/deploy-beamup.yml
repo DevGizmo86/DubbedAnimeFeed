@@ -1,0 +1,96 @@
+name: Deploy to Beamup
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beamup-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag is the current main release
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Use a release tag such as v1.5.1." >&2
+            exit 1
+          fi
+          git fetch origin main --no-tags
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+            echo "The release tag must point to the current main commit." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify addon version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node <<'NODE'
+          const expected = process.env.RELEASE_TAG.slice(1);
+          const actual = require('./package.json').version;
+          const manifest = require('./addon').manifest.version;
+          if (actual !== expected || manifest !== expected) {
+            throw new Error(`Tag v${expected}, package.json ${actual}, manifest ${manifest} must match`);
+          }
+          NODE
+
+      - name: Check code and run tests
+        run: |
+          set -euo pipefail
+          node --check addon.js
+          node --check services/kitsu.js
+          node --check services/tmdb.js
+          if compgen -G "test/*.test.js" > /dev/null; then
+            node --test test/*.test.js
+          fi
+
+      - name: Deploy tagged commit to Beamup
+        env:
+          BEAMUP_REMOTE: ${{ secrets.BEAMUP_REMOTE }}
+          BEAMUP_SSH_PRIVATE_KEY: ${{ secrets.BEAMUP_SSH_PRIVATE_KEY }}
+          BEAMUP_SSH_KNOWN_HOSTS: ${{ secrets.BEAMUP_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          for secret_name in BEAMUP_REMOTE BEAMUP_SSH_PRIVATE_KEY BEAMUP_SSH_KNOWN_HOSTS; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing GitHub Actions secret: ${secret_name}" >&2
+              exit 1
+            fi
+          done
+
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$BEAMUP_SSH_PRIVATE_KEY" > "$HOME/.ssh/beamup_deploy"
+          chmod 600 "$HOME/.ssh/beamup_deploy"
+          printf '%s\n' "$BEAMUP_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          unset BEAMUP_SSH_PRIVATE_KEY BEAMUP_SSH_KNOWN_HOSTS
+
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/beamup_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          git remote add beamup "$BEAMUP_REMOTE"
+          git push beamup HEAD:refs/heads/main
