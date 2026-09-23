@@ -96,6 +96,29 @@ git push beamup
 > git config remote.beamup.push refs/heads/main:refs/heads/main
 > ```
 
+### Deploy automatico con un tag
+
+La workflow [`.github/workflows/deploy-beamup.yml`](.github/workflows/deploy-beamup.yml) pubblica su Beamup quando viene inviato un tag `vX.Y.Z` sul commit corrente di `main`. Il tag deve coincidere sia con la versione di `package.json` sia con `manifest.version` in `addon.js`; prima del deploy vengono eseguiti i controlli e i test.
+
+Configura questi **segreti del repository** in GitHub → Settings → Secrets and variables → Actions:
+
+| Segreto | Valore |
+|---------|--------|
+| `BEAMUP_REMOTE` | URL esatto di `git remote get-url beamup` sul computer da cui pubblichi già l'addon (es. `dokku@deployer.beamup.dev:<account-id>/<addon-slug>`). |
+| `BEAMUP_SSH_PRIVATE_KEY` | Chiave privata SSH dedicata alla Action. La chiave pubblica corrispondente deve essere autorizzata sul tuo account GitHub e sincronizzata con Beamup tramite `beamup-cli`. |
+| `BEAMUP_SSH_KNOWN_HOSTS` | Riga verificata del server Beamup nel tuo `known_hosts` (puoi individuarla con `ssh-keygen -F <host-beamup>`). |
+
+Dopo aver unito le modifiche su `main` e aggiornato entrambe le versioni, crea e invia il tag:
+
+```bash
+git checkout main
+git pull --ff-only
+git tag v1.5.1
+git push origin v1.5.1
+```
+
+Sostituisci `v1.5.1` con la versione presente nei file. Il push del tag avvia la Action, che distribuisce esattamente quel commit su Beamup. Un tag su un commit diverso dalla punta corrente di `main` viene rifiutato per evitare distribuzioni accidentali di versioni precedenti.
+
 ### Le modifiche non si vedono dopo il deploy?
 
 Davanti a Beamup c'è **Cloudflare**, che mette in cache il manifest. Dopo un deploy riuscito conviene **incrementare il campo `version`** nel manifest ([addon.js](addon.js) e [package.json](package.json)) e, in Stremio, **rimuovere e reinstallare** l'addon per rileggere il manifest aggiornato.
