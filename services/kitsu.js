@@ -7,11 +7,9 @@ const KITSU_API = "https://kitsu.io/api/edge";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
-// Stop fetching real episode pages after this many (20 each): for very long
-// series we fall back to synthesizing the remaining entries from episodeCount,
-// keeping the meta response bounded.
+// Follow Kitsu's episode pagination, with a safety limit for malformed feeds.
 const EP_PAGE_SIZE = 20;
-const MAX_EP_PAGES = 12; // up to 240 episodes with real metadata
+const MAX_EP_PAGES = 75; // up to 1,500 episodes with real metadata
 
 // Built meta objects are cached per id: episode lists rarely change and this
 // keeps repeated opens instant. Ongoing shows still refresh within the TTL.
@@ -47,25 +45,12 @@ function pickCover(img) {
   return img.large || img.original || img.medium || undefined;
 }
 
-// Fetch real episode metadata (number/title/airdate/thumbnail), paginated and
-// capped. Returns a Map number → episode attributes.
-// Total episode count. Ongoing/long series often have a null episodeCount on
-// the anime record, so fall back to the episodes endpoint's meta.count.
-async function getEpisodeCount(kitsuId, episodeCountAttr) {
-  const fromAttr = parseInt(episodeCountAttr, 10);
-  if (Number.isFinite(fromAttr) && fromAttr > 0) return fromAttr;
-  try {
-    const json = await kitsuGet(`/anime/${kitsuId}/episodes?page%5Blimit%5D=1`);
-    const count = json.meta && parseInt(json.meta.count, 10);
-    return Number.isFinite(count) ? count : 0;
-  } catch (err) {
-    debug(`Kitsu episode count ${kitsuId} failed: ${err.message}`);
-    return 0;
-  }
-}
-
+// Fetch every available episode page. Kitsu's anime.episodeCount and the
+// episodes collection can disagree, so keep both counts and the largest
+// numbered episode. An interrupted page walk retains the data already read.
 async function fetchEpisodes(kitsuId) {
   const byNumber = new Map();
+  let collectionCount = 0;
   for (let page = 0; page < MAX_EP_PAGES; page++) {
     const offset = page * EP_PAGE_SIZE;
     let json;
@@ -78,15 +63,17 @@ async function fetchEpisodes(kitsuId) {
       debug(`Kitsu episodes ${kitsuId} page ${page} failed: ${err.message}`);
       break;
     }
-    const data = json.data || [];
+    const count = parseInt(json.meta && json.meta.count, 10);
+    if (Number.isFinite(count) && count > collectionCount) collectionCount = count;
+    const data = Array.isArray(json.data) ? json.data : [];
     for (const e of data) {
       const a = e.attributes || {};
       const num = parseInt(a.number, 10);
-      if (Number.isFinite(num)) byNumber.set(num, a);
+      if (Number.isFinite(num) && num > 0) byNumber.set(num, a);
     }
-    if (data.length < EP_PAGE_SIZE) break; // last page
+    if (data.length < EP_PAGE_SIZE || (json.links && !json.links.next)) break;
   }
-  return byNumber;
+  return { byNumber, collectionCount };
 }
 
 // Build the Stremio `videos` array. Episode video ids use the kitsu format
@@ -102,7 +89,7 @@ function buildVideos(kitsuId, total, realEpisodes) {
     videos.push({
       id: `kitsu:${kitsuId}:${n}`,
       title,
-      season: a && Number.isFinite(parseInt(a.seasonNumber, 10)) ? parseInt(a.seasonNumber, 10) : 1,
+      season: 1,
       episode: n,
       released: a && a.airdate ? new Date(a.airdate).toISOString() : undefined,
       thumbnail: a && a.thumbnail ? a.thumbnail.original || a.thumbnail.large : undefined,
@@ -156,20 +143,36 @@ async function withItalian(base, info, kitsuId, tmdbKey) {
   const name = (tmdbIt && tmdbIt.name) || (au && au.name) || base.name;
   const description =
     (tmdbIt && tmdbIt.description) || (au && au.description) || base.description;
-  const epTitles = tmdbIt && tmdbIt.episodes && tmdbIt.episodes.length ? tmdbIt.episodes : null;
+  const tmdbEpisodes = tmdbIt && tmdbIt.episodes && tmdbIt.episodes.length
+    ? tmdbIt.episodes
+    : null;
 
-  if (name === base.name && description === base.description && !epTitles) {
-    return base; // nothing localized — return the base meta untouched
+  if (name === base.name && description === base.description && !tmdbEpisodes) {
+    return base;
   }
 
   const meta = { ...base, name, description };
-  // Overlay Italian episode titles/overviews by absolute order; keep the Kitsu
-  // value where TMDB has no matching entry.
-  if (epTitles && Array.isArray(base.videos)) {
-    meta.videos = base.videos.map((v, i) => {
-      const ep = epTitles[i];
-      if (!ep) return v;
-      return { ...v, title: ep.title || v.title, overview: ep.overview || v.overview };
+  if (tmdbEpisodes && !info.isMovie) {
+    const kitsuVideos = Array.isArray(base.videos) ? base.videos : [];
+    const total = Math.max(kitsuVideos.length, tmdbEpisodes.length);
+    meta.videos = Array.from({ length: total }, (_, i) => {
+      const number = i + 1;
+      const video = kitsuVideos[i] || {
+        id: `kitsu:${kitsuId}:${number}`,
+        title: `Episodio ${number}`,
+        season: 1,
+        episode: number,
+      };
+      const ep = tmdbEpisodes[i];
+      return ep
+        ? {
+            ...video,
+            title: ep.title || video.title,
+            overview: ep.overview || video.overview,
+            thumbnail: ep.thumbnail || video.thumbnail,
+            released: video.released || ep.released,
+          }
+        : video;
     });
   }
   return meta;
@@ -195,7 +198,16 @@ async function getKitsuMeta(kitsuId, type, tmdbKey) {
     .slice(0, 8);
 
   const isMovie = a.subtype === "movie";
-  const total = isMovie ? 0 : await getEpisodeCount(kitsuId, a.episodeCount);
+  const episodeData = isMovie ? null : await fetchEpisodes(kitsuId);
+  const attributeCount = parseInt(a.episodeCount, 10);
+  const numberedCount = episodeData && episodeData.byNumber.size
+    ? Math.max(...episodeData.byNumber.keys())
+    : 0;
+  const total = isMovie ? 0 : Math.max(
+    Number.isFinite(attributeCount) ? attributeCount : 0,
+    episodeData.collectionCount,
+    numberedCount
+  );
 
   const startYear = yearOf(a.startDate);
   const endYear = yearOf(a.endDate);
@@ -216,8 +228,7 @@ async function getKitsuMeta(kitsuId, type, tmdbKey) {
 
   // Series: attach an episode list. Movies / single-episode entries stay flat.
   if (!isMovie && total > 1) {
-    const realEpisodes = await fetchEpisodes(kitsuId);
-    meta.videos = buildVideos(kitsuId, total, realEpisodes);
+    meta.videos = buildVideos(kitsuId, total, episodeData.byNumber);
   }
 
   // Bits TMDB needs to resolve this anime, stored so cache hits can enrich too.

@@ -13,7 +13,7 @@ L'addon aggiunge a Stremio quattro cataloghi:
 
 Ogni elemento usa un **id Kitsu** (`kitsu:<id>`) e l'addon fornisce direttamente la **scheda con la lista episodi** (metadati da [Kitsu](https://kitsu.io/)).
 
-L'addon **non riproduce video**: per le **fonti/streaming** serve un addon di streaming anime (vedi sotto). La scheda e gli episodi, invece, vengono caricati dall'addon stesso, senza dipendere da Anime Kitsu.
+L'addon **non riproduce video**: per le **fonti/streaming** serve un addon di streaming anime (vedi sotto). La scheda e gli episodi, invece, vengono caricati dall'addon stesso, senza dipendere da Anime Kitsu. Gli episodi delle serie sono mostrati in un'unica stagione con numerazione progressiva e ID `kitsu:<id>:<episodio>`. Per serie molto lunghe o con un conteggio Kitsu incompleto, una chiave TMDB configurata può integrare gli episodi mancanti e fornire immagini distinte quando disponibili.
 
 ### Come funziona (flusso)
 
