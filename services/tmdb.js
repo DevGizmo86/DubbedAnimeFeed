@@ -13,7 +13,7 @@ const UA =
 // id (or title+year), independent of which user's key triggered the fetch.
 const idCache = new Map(); // lookup key → tmdbId | null
 const detailCache = new Map(); // "tv:1429" / "movie:372058" → { name, description, seasons }
-const episodeCache = new Map(); // tvId → flat ordered [{ title, overview }]
+const episodeCache = new Map(); // tvId → flat ordered episode metadata
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function fresh(entry) {
@@ -125,7 +125,12 @@ async function getEpisodes(key, tvId, seasons) {
       const j = await tmdbGet(key, `/tv/${tvId}/season/${s.season_number}`, {});
       const eps = (j.episodes || []).sort((a, b) => a.episode_number - b.episode_number);
       for (const e of eps) {
-        list.push({ title: e.name || undefined, overview: e.overview || undefined });
+        list.push({
+          title: e.name || undefined,
+          overview: e.overview || undefined,
+          thumbnail: e.still_path ? `https://image.tmdb.org/t/p/w500${e.still_path}` : undefined,
+          released: e.air_date ? new Date(e.air_date).toISOString() : undefined,
+        });
       }
     } catch (err) {
       debug(`TMDB season ${tvId}/${s.season_number} failed: ${err.message}`);
