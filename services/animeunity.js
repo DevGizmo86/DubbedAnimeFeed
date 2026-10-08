@@ -272,7 +272,7 @@ async function recordsToMetas(records) {
       });
       return {
         id: `kitsu:${kitsuId}`,
-        type: "anime",
+        type: isSeries(a) ? "series" : "movie",
         name,
         poster: a.imageurl || undefined,
         posterShape: "poster",

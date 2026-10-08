@@ -14,7 +14,7 @@ const LATEST_MOVIES_ID = "au-dubbed-latest-movies";
 // MAL top ranking ∩ dubbed archive, split into series and movies.
 const TOP_SERIES_ID = "mal-top-dubbed-series";
 const TOP_MOVIES_ID = "mal-top-dubbed-movies";
-// MAL top *airing* ranking ∩ dubbed archive (home-only, single mixed row).
+// MAL top *airing* ranking ∩ dubbed archive (home-only, mixed row).
 const AIRING_ID = "mal-airing-dubbed";
 // Search-only catalogs over the full dubbed archive, split into series/movies.
 const SEARCH_SERIES_ID = "au-dubbed-search-series";
@@ -22,7 +22,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.5.4",
+  version: "1.5.5",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -31,7 +31,7 @@ const manifest = {
   // works on any host without bloating the manifest past the 8kb limit.
   background: "/assets/background.png",
   resources: ["catalog", "meta"],
-  types: ["anime"],
+  types: ["series", "movie", "anime"],
   idPrefixes: ["kitsu:"],
   // Optional user configuration: a TMDB API key. When provided, titles,
   // synopses and episode names are fetched from TMDB in Italian; without it the
@@ -46,13 +46,13 @@ const manifest = {
   ],
   catalogs: [
     {
-      type: "anime",
+      type: "series",
       id: LATEST_SERIES_ID,
       name: "Ultime serie doppiate ITA",
       extra: [{ name: "skip", isRequired: false }],
     },
     {
-      type: "anime",
+      type: "movie",
       id: LATEST_MOVIES_ID,
       name: "Ultimi film doppiati ITA",
       extra: [{ name: "skip", isRequired: false }],
@@ -60,13 +60,13 @@ const manifest = {
     {
       // Home board catalog: MyAnimeList's top ranking filtered to the anime
       // that are available dubbed in Italian on AnimeUnity, in MAL rank order.
-      type: "anime",
+      type: "series",
       id: TOP_SERIES_ID,
       name: "Top serie anime ITA",
       extra: [{ name: "skip", isRequired: false }],
     },
     {
-      type: "anime",
+      type: "movie",
       id: TOP_MOVIES_ID,
       name: "Top film anime ITA",
       extra: [{ name: "skip", isRequired: false }],
@@ -76,7 +76,7 @@ const manifest = {
       // (topanime.php?type=airing) filtered to the anime available dubbed in
       // Italian on AnimeUnity, in MAL rank order. No `search` extra, so it
       // only shows on the home board.
-      type: "anime",
+      type: "series",
       id: AIRING_ID,
       name: "Top anime in onda ITA",
       extra: [{ name: "skip", isRequired: false }],
@@ -85,7 +85,7 @@ const manifest = {
       // Search-only catalog: `search` is required, so Stremio never shows this
       // on the home board — it's queried only when the user runs a search.
       // Backed by AnimeUnity's full dubbed archive (not just the latest feed).
-      type: "anime",
+      type: "series",
       id: SEARCH_SERIES_ID,
       name: "Serie anime doppiate ITA",
       extra: [
@@ -94,7 +94,7 @@ const manifest = {
       ],
     },
     {
-      type: "anime",
+      type: "movie",
       id: SEARCH_MOVIES_ID,
       name: "Film anime doppiati ITA",
       extra: [
