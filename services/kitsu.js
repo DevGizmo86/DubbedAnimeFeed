@@ -147,11 +147,13 @@ async function withItalian(base, info, kitsuId, tmdbKey) {
     ? tmdbIt.episodes
     : null;
 
-  if (name === base.name && description === base.description && !tmdbEpisodes) {
+  if (name === base.name && description === base.description && !tmdbEpisodes && !(tmdbIt && (tmdbIt.cast || tmdbIt.trailers))) {
     return base;
   }
 
   const meta = { ...base, name, description };
+  if (tmdbIt && tmdbIt.cast && tmdbIt.cast.length) meta.cast = tmdbIt.cast;
+  if (tmdbIt && tmdbIt.trailers && tmdbIt.trailers.length) meta.trailers = tmdbIt.trailers;
   if (tmdbEpisodes && !info.isMovie) {
     const kitsuVideos = Array.isArray(base.videos) ? base.videos : [];
     const total = Math.max(kitsuVideos.length, tmdbEpisodes.length);
@@ -184,7 +186,7 @@ async function withItalian(base, info, kitsuId, tmdbKey) {
 async function getKitsuMeta(kitsuId, type, tmdbKey) {
   const cached = metaCache.get(kitsuId);
   if (cached && Date.now() - cached.builtAt < META_TTL_MS) {
-    return withItalian(cached.meta, cached.info, kitsuId, tmdbKey);
+    return withItalian({ ...cached.meta, type }, cached.info, kitsuId, tmdbKey);
   }
 
   const json = await kitsuGet(`/anime/${kitsuId}?include=categories`);
@@ -223,6 +225,9 @@ async function getKitsuMeta(kitsuId, type, tmdbKey) {
     releaseInfo: endYear && endYear !== startYear ? `${startYear}-${endYear}` : startYear,
     imdbRating: toRating10(a.averageRating),
     genres: genres.length ? genres : undefined,
+    trailers: /^[A-Za-z0-9_-]{11}$/.test(a.youtubeVideoId || "")
+      ? [{ source: a.youtubeVideoId, type: "Trailer", ytId: a.youtubeVideoId }]
+      : undefined,
     runtime: a.episodeLength ? `${a.episodeLength} min` : undefined,
   };
 

@@ -96,10 +96,15 @@ async function getDetail(key, isMovie, tmdbId) {
 
   let value = null;
   try {
-    const j = await tmdbGet(key, `/${isMovie ? "movie" : "tv"}/${tmdbId}`, {});
+    const j = await tmdbGet(key, `/${isMovie ? "movie" : "tv"}/${tmdbId}`, { append_to_response: "credits,videos", include_video_language: "it,en,ja,null" });
     value = {
       name: (isMovie ? j.title : j.name) || undefined,
       description: j.overview || undefined,
+      cast: (j.credits && j.credits.cast || []).map((actor) => actor.name).filter(Boolean).slice(0,30),
+      trailers: (j.videos && j.videos.results || [])
+        .filter((video) => video.site === "YouTube" && video.type === "Trailer" && /^[A-Za-z0-9_-]{11}$/.test(video.key || ""))
+        .sort((a,b) => Number(b.iso_639_1 === "it") - Number(a.iso_639_1 === "it"))
+        .map((video) => ({ source: video.key, type: "Trailer", ytId: video.key })),
       seasons: !isMovie && Array.isArray(j.seasons) ? j.seasons : [],
     };
   } catch (err) {
@@ -167,7 +172,7 @@ async function getItalian(key, { isMovie, tvdbId, titles, year }) {
   if (!detail) return null;
 
   const episodes = isMovie ? [] : await getEpisodes(key, tmdbId, detail.seasons);
-  return { name: detail.name, description: detail.description, episodes };
+  return { name: detail.name, description: detail.description, episodes, cast: detail.cast, trailers: detail.trailers };
 }
 
 module.exports = { getItalian, getItalianBasic };
