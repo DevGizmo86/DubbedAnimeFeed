@@ -3,8 +3,20 @@ const assert = require("node:assert/strict");
 const Module = require("node:module");
 
 const originalLoad = Module._load;
+let supplemental777Calls = 0;
 const fetch = async (url) => {
   const parsed = new URL(url);
+  if (parsed.hostname === "easycatalogs.sonnysini.uk") {
+    const id = parsed.pathname.match(/kitsu:(\d+)/)?.[1];
+    if (id === "777" && ++supplemental777Calls === 1) {
+      return { ok: true, json: async () => ({ meta: { id: "kitsu:999", type: "series", cast: ["Wrong actor"] } }) };
+    }
+    return { ok: true, json: async () => ({ meta: {
+      id: `kitsu:${id}`, type: "series", cast: ["Provider actor"],
+      trailers: [{ source: "qgQunxD0qCk", type: "Trailer" }],
+      videos: [{ id: `kitsu:${id}:1`, overview: "Trama italiana", title: "Provider title", season: 9, episode: 99 }],
+    } }) };
+  }
   const id = parsed.pathname.match(/\/anime\/(\d+)/)?.[1];
   const isEpisodes = parsed.pathname.endsWith("/episodes");
   if (parsed.pathname.endsWith("/mappings")) {
@@ -109,4 +121,25 @@ test("manifest uses standard catalog types while keeping legacy anime metadata",
   const { manifest } = require("../addon");
   assert.deepEqual(manifest.types, ["series", "movie", "anime"]);
   assert(manifest.catalogs.every(c => c.type === (c.id.endsWith("movies") ? "movie" : "series")));
+});
+
+
+test("keyless supplemental metadata supplies Italian plots without changing episode identity", async () => {
+  const meta = await getKitsuMeta("888", "series");
+  assert.equal(meta.videos[0].overview, "Trama italiana");
+  assert.equal(meta.videos[0].id, "kitsu:888:1");
+  assert.equal(meta.videos[0].season, 1);
+  assert.equal(meta.videos[0].episode, 1);
+  assert.equal(meta.videos[0].title, "Kitsu 1");
+  assert.deepEqual(meta.cast, ["Provider actor"]);
+});
+
+
+test("unrelated supplemental metadata is rejected and a later request can recover", async () => {
+  const first = await getKitsuMeta("777", "series");
+  assert.equal(first.cast, undefined);
+  assert.equal(first.videos[0].overview, undefined);
+  const second = await getKitsuMeta("777", "series");
+  assert.deepEqual(second.cast, ["Provider actor"]);
+  assert.equal(supplemental777Calls, 2);
 });

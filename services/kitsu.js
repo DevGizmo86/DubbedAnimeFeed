@@ -16,6 +16,58 @@ const MAX_EP_PAGES = 75; // up to 1,500 episodes with real metadata
 const metaCache = new Map(); // kitsuId → { meta, builtAt }
 const META_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+// Public Italian metadata provider, also usable without an addon TMDB key.
+// Only supplement an exact Kitsu ID; retain our episode IDs and numbering.
+const supplementalCache = new Map();
+const supplementalPending = new Map();
+async function getSupplementalMeta(kitsuId, type) {
+  const key = `${type}:${kitsuId}`;
+  const cached = supplementalCache.get(key);
+  if (cached && Date.now() - cached.builtAt < META_TTL_MS) return cached.meta;
+  if (supplementalPending.has(key)) return supplementalPending.get(key);
+  const pending = (async () => {
+    try {
+      const res = await fetch(
+        `https://easycatalogs.sonnysini.uk/meta/${type}/kitsu:${kitsuId}.json`,
+        { headers: { "User-Agent": UA, Accept: "application/json" }, timeout: 8000 }
+      );
+      if (!res.ok) throw new Error(`metadata provider HTTP ${res.status}`);
+      const json = await res.json();
+      const meta = json && json.meta;
+      if (!meta || meta.id !== `kitsu:${kitsuId}` || meta.type !== type) {
+        throw new Error("metadata provider returned a different title");
+      }
+      supplementalCache.set(key, { meta, builtAt: Date.now() });
+      return meta;
+    } catch (err) {
+      debug(`Italian supplemental metadata ${kitsuId} failed: ${err.message}`);
+      return null;
+    } finally {
+      supplementalPending.delete(key);
+    }
+  })();
+  supplementalPending.set(key, pending);
+  return pending;
+}
+
+function supplementMeta(base, supplemental) {
+  if (!supplemental) return base;
+  const meta = { ...base };
+  if (supplemental.description) meta.description = supplemental.description;
+  if (Array.isArray(supplemental.cast) && supplemental.cast.length) meta.cast = supplemental.cast;
+  if (Array.isArray(supplemental.trailers) && supplemental.trailers.length) {
+    const trailers = supplemental.trailers.filter(t => /^[A-Za-z0-9_-]{11}$/.test(t.source || t.ytId || ""));
+    if (trailers.length) meta.trailers = trailers.map(t => ({ source: t.source || t.ytId, type: "Trailer", ytId: t.source || t.ytId }));
+  }
+  const episodes = new Map((Array.isArray(supplemental.videos) ? supplemental.videos : []).map(v => [v.id, v]));
+  if (Array.isArray(base.videos)) meta.videos = base.videos.map(video => {
+    const match = episodes.get(video.id);
+    if (!match) return video;
+    return { ...video, overview: match.overview || video.overview, thumbnail: video.thumbnail || match.thumbnail };
+  });
+  return meta;
+}
+
 async function kitsuGet(pathAndQuery) {
   const res = await fetch(`${KITSU_API}${pathAndQuery}`, {
     headers: { "User-Agent": UA, Accept: "application/vnd.api+json" },
@@ -124,6 +176,8 @@ async function getTvdbId(kitsuId) {
 // on every return — including cache hits — and cloned so the cached base meta
 // stays untouched. `info` carries the bits TMDB needs to resolve the anime.
 async function withItalian(base, info, kitsuId, tmdbKey) {
+  const mediaType = info.isMovie ? "movie" : "series";
+  base = supplementMeta(base, await getSupplementalMeta(kitsuId, mediaType));
   let tmdbIt = null;
   if (tmdbKey) {
     try {
