@@ -16,14 +16,15 @@ const response = (json) => ({ ok: true, json: async () => json });
 
 test('Jikan failures and malformed responses do not poison the ranking cache', async () => {
   let calls = 0;
-  const mal = loadService('mal', { 'node-fetch': async () => {
+  const mal = loadService('mal', { 'node-fetch': async (url) => {
+    if (url.startsWith('https://myanimelist.net/')) throw new Error('MyAnimeList unavailable');
     calls++;
     if (calls === 1) return { ok: false, status: 502 };
     if (calls === 2) return response({ error: 'upstream failure' });
     return response({ data: [{ mal_id: 1, title: 'Example', rank: 1 }] });
   }});
-  await assert.rejects(mal.getTopAnime(1), /502/);
-  await assert.rejects(mal.getTopAnime(1), /Invalid/);
+  await assert.rejects(mal.getTopAnime(1), /MyAnimeList unavailable/);
+  await assert.rejects(mal.getTopAnime(1), /MyAnimeList unavailable/);
   assert.equal((await mal.getTopAnime(1)).length, 1);
   assert.equal((await mal.getTopAnime(1)).length, 1);
   assert.equal(calls, 3);
@@ -64,4 +65,31 @@ test('all three top catalogs recover after an archive failure and share archive 
   assert.equal(airing.length, 2);
   assert.equal(archiveCalls, 3);
   assert.equal(homeCalls, 2);
+});
+
+
+test('Jikan failure falls back to the same MAL airing ranking and shares concurrent loads', async () => {
+  let calls = 0;
+  const mal = loadService('mal', { 'node-fetch': async (url, options) => {
+    calls++;
+    assert(options.timeout > 0);
+    if (url.startsWith('https://api.jikan.moe/')) return { ok: false, status: 502 };
+    assert.equal(url, 'https://myanimelist.net/topanime.php?type=airing&limit=0');
+    return { ok: true, text: async () => `<tr class="ranking-list"><td><span class="lightLink top-anime-rank-text rank1">1</span></td><td><h3><a href="https://myanimelist.net/anime/123/Example">Example</a></h3></td></tr>` };
+  }});
+  const [first, second] = await Promise.all([mal.getTopAnime(20, 'airing'), mal.getTopAnime(20, 'airing')]);
+  assert.deepEqual(first, [{ mal_id: 123, rank: 1, title: 'Example' }]);
+  assert.deepEqual(second, first);
+  assert.equal(calls, 2);
+  assert.deepEqual(await mal.getTopAnime(20, 'airing'), first);
+  assert.equal(calls, 2);
+});
+
+test('MAL error pages are rejected and are not cached as empty rankings', async () => {
+  const mal = loadService('mal', { 'node-fetch': async (url) => {
+    if (url.startsWith('https://api.jikan.moe/')) return { ok: false, status: 502 };
+    return { ok: true, text: async () => '<html>Unavailable</html>' };
+  }});
+  await assert.rejects(mal.getTopAnime(1), /unavailable or unrecognized/);
+  assert.deepEqual(mal.parseMalRanking('<html>Unavailable</html>'), []);
 });
