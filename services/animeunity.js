@@ -162,9 +162,11 @@ async function mapToKitsu(externalSite, externalId) {
         null;
     } else {
       debug(`Kitsu mapping ${cacheKey} status ${res.status}`);
+      return null;
     }
   } catch (err) {
     debug(`Kitsu mapping ${cacheKey} failed: ${err.message}`);
+    return null;
   }
 
   kitsuCache.set(cacheKey, kitsuId);
@@ -370,7 +372,7 @@ async function getAuContext() {
 }
 
 // One page of the dubbed archivio search. `offset` is a raw record offset.
-async function fetchSearchPage(query, offset) {
+async function fetchSearchPage(query, offset, retry = true) {
   const ctx = await getAuContext();
   const res = await fetch(`${AU_BASE}/archivio/get-animes`, {
     method: "POST",
@@ -396,9 +398,14 @@ async function fetchSearchPage(query, offset) {
       season: false,
     }),
   });
+  if (res.status === 419 && retry) {
+    auContext = null;
+    return fetchSearchPage(query, offset, false);
+  }
   if (!res.ok) throw new Error(`AnimeUnity search error: ${res.status}`);
   const json = await res.json();
-  return Array.isArray(json.records) ? json.records : [];
+  if (!Array.isArray(json.records)) throw new Error("Invalid AnimeUnity archive response");
+  return json.records;
 }
 
 // Walk the archivio pages (capped) for `query` and return the raw dubbed
@@ -461,7 +468,15 @@ async function searchDubbedCatalog(query, kind, skip, tmdbKey) {
 // Walk AnimeUnity's full dubbed archive (empty query) and index every record
 // by its MyAnimeList id, so we can quickly tell whether a MAL-top anime is
 // available dubbed. Cached for DUBBED_INDEX_TTL_MS.
-async function buildDubbedIndex() {
+let dubbedIndexPending = null;
+function buildDubbedIndex() {
+  if (!dubbedIndexPending) {
+    dubbedIndexPending = loadDubbedIndex().finally(() => { dubbedIndexPending = null; });
+  }
+  return dubbedIndexPending;
+}
+
+async function loadDubbedIndex() {
   if (dubbedIndexCache && Date.now() - dubbedIndexCache.builtAt < DUBBED_INDEX_TTL_MS) {
     return dubbedIndexCache.index;
   }
@@ -473,8 +488,9 @@ async function buildDubbedIndex() {
     try {
       records = await fetchSearchPage("", offset);
     } catch (err) {
-      debug(`AnimeUnity: stopping archive walk at offset ${offset}: ${err.message}`);
-      break;
+      console.error(`AnimeUnity archive failed at offset ${offset}: ${err.message}`);
+      if (dubbedIndexCache) return dubbedIndexCache.index;
+      throw err;
     }
     if (records.length === 0) break;
     offset += records.length;
@@ -486,6 +502,7 @@ async function buildDubbedIndex() {
     if (records.length < SEARCH_API_PAGE) break; // last page
   }
 
+  if (index.size === 0) throw new Error("AnimeUnity dubbed archive is empty");
   dubbedIndexCache = { index, builtAt: Date.now() };
   debug(`buildDubbedIndex: ${index.size} dubbed anime indexed by mal_id`);
   return index;
@@ -494,7 +511,15 @@ async function buildDubbedIndex() {
 // Match MyAnimeList's top ranking against the dubbed archive, preserving MAL
 // rank order, and return the matched raw records. Cached once and shared by the
 // series and movie top catalogs.
-async function getTopDubbedRecords() {
+let topRecordsPending = null;
+function getTopDubbedRecords() {
+  if (!topRecordsPending) {
+    topRecordsPending = loadTopDubbedRecords().finally(() => { topRecordsPending = null; });
+  }
+  return topRecordsPending;
+}
+
+async function loadTopDubbedRecords() {
   if (topRecordsCache && Date.now() - topRecordsCache.builtAt < TOP_CATALOG_TTL_MS) {
     return topRecordsCache.records;
   }
@@ -526,6 +551,7 @@ async function buildTopDubbedCatalog(kind) {
   }
   const records = filterByKind(await getTopDubbedRecords(), kind);
   const metas = await recordsToMetas(records);
+  if (records.length && !metas.length) throw new Error("Kitsu mappings unavailable for top catalog");
   topMetaCache[kind] = { metas, builtAt: Date.now() };
   return metas;
 }
@@ -569,6 +595,7 @@ async function buildTopAiringDubbedCatalog() {
   }
   const records = await getTopAiringDubbedRecords();
   const metas = await recordsToMetas(records);
+  if (records.length && !metas.length) throw new Error("Kitsu mappings unavailable for airing catalog");
   airingMetaCache = { metas, builtAt: Date.now() };
   return metas;
 }

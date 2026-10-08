@@ -34,7 +34,8 @@ async function fetchTopPage(page, filter) {
     });
     if (res.ok) {
       const json = await res.json();
-      return Array.isArray(json.data) ? json.data : [];
+      if (!Array.isArray(json.data)) throw new Error("Invalid Jikan top response");
+      return json.data;
     }
     if (res.status === 429 && attempt === 0) {
       debug(`MAL: 429 on page ${page}, backing off ${RATE_LIMIT_BACKOFF_MS}ms`);
@@ -61,8 +62,9 @@ async function getTopAnime(maxPages, filter = "") {
     try {
       data = await fetchTopPage(page, filter);
     } catch (err) {
-      debug(`MAL: stopping top walk at page ${page}: ${err.message}`);
-      break;
+      console.error(`MAL top failed at page ${page}: ${err.message}`);
+      if (cached) return cached.list;
+      throw err;
     }
     if (data.length === 0) break;
     for (const a of data) {
@@ -72,6 +74,7 @@ async function getTopAnime(maxPages, filter = "") {
     if (page < maxPages) await sleep(REQUEST_DELAY_MS);
   }
 
+  if (!list.length) throw new Error("Jikan top ranking is empty");
   topCache.set(filter, { list, builtAt: Date.now() });
   debug(`MAL: cached top ${list.length} anime${filter ? ` (${filter})` : ""}`);
   return list;
