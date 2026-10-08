@@ -86,6 +86,7 @@ async function fetchFeedPage(page) {
   debug(`AnimeUnity: feed page ${page}`);
   const res = await fetch(url, {
     headers: { "User-Agent": UA, Accept: "text/html" },
+    timeout: 15000,
   });
   if (!res.ok) throw new Error(`AnimeUnity feed error: ${res.status}`);
 
@@ -153,6 +154,7 @@ async function mapToKitsu(externalSite, externalId) {
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": UA, Accept: "application/vnd.api+json" },
+      timeout: 10000,
     });
     if (res.ok) {
       const json = await res.json();
@@ -354,6 +356,7 @@ async function getAuContext() {
   }
   const res = await fetch(`${AU_BASE}/`, {
     headers: { "User-Agent": UA, Accept: "text/html" },
+    timeout: 15000,
   });
   if (!res.ok) throw new Error(`AnimeUnity home error: ${res.status}`);
 
@@ -376,6 +379,7 @@ async function fetchSearchPage(query, offset, retry = true) {
   const ctx = await getAuContext();
   const res = await fetch(`${AU_BASE}/archivio/get-animes`, {
     method: "POST",
+    timeout: 15000,
     headers: {
       "User-Agent": UA,
       "Content-Type": "application/json",
