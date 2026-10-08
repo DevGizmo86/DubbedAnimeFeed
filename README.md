@@ -154,3 +154,19 @@ DEBUG=1 node index.js
 - Il catalogo dipende dalla disponibilità dei titoli su AnimeUnity e dalla presenza di un mapping su Kitsu: i titoli senza mapping Kitsu vengono esclusi.
 - L'addon si appoggia a un'API pubblica non ufficiale di AnimeUnity: eventuali modifiche lato loro possono richiedere aggiornamenti.
 - Per scheda completa e riproduzione servono gli addon anime dell'ecosistema (Anime Kitsu + un provider di stream).
+
+
+### Metadati in Nuvio (1.5.6)
+
+I cataloghi usano i tipi standard `series` e `movie`, mantenendo gli ID Kitsu.
+Dopo l'aggiornamento, aggiorna/reinstalla l'addon e modifica il `type` nelle
+collezioni JSON che usavano `anime`; addonId e catalogId non cambiano.
+Le vecchie richieste meta con tipo `anime` restano disponibili.
+
+Le schede integrano cast, trailer e trame degli episodi dall'endpoint pubblico
+EasyCatalogs, senza richiedere una chiave TMDB nell'addon. Questo recupero
+aggiuntivo richiede che il servizio sia disponibile e che abbia metadati per
+quel titolo. In caso di errore o timeout vengono mantenuti i dati Kitsu.
+Il collegamento degli episodi avviene per ID esatto, senza cambiare numerazione
+né ID delle fonti. La chiave TMDB opzionale nell'addon mantiene la priorità
+per le traduzioni italiane; la chiave impostata in Nuvio è usata dall'app.
