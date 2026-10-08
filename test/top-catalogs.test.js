@@ -93,3 +93,35 @@ test('MAL error pages are rejected and are not cached as empty rankings', async 
   await assert.rejects(mal.getTopAnime(1), /unavailable or unrecognized/);
   assert.deepEqual(mal.parseMalRanking('<html>Unavailable</html>'), []);
 });
+
+function rankingRow(id, rank) {
+  return `<tr class="ranking-list"><td><span class="top-anime-rank-text">${rank}</span></td><td><h3><a href="https://myanimelist.net/anime/${id}/Example">Example</a></h3></td></tr>`;
+}
+
+test('MAL accepts unranked airing entries and stops at a full final page without next', async () => {
+  const offsets = [];
+  const mal = loadService('mal', { 'node-fetch': async (url) => {
+    if (url.startsWith('https://api.jikan.moe/')) return { ok: false, status: 502 };
+    const offset = Number(new URL(url).searchParams.get('limit'));
+    offsets.push(offset);
+    const rows = Array.from({ length: 50 }, (_, i) => rankingRow(offset + i + 1, offset ? '-' : i + 1)).join('');
+    return { ok: true, text: async () => rows + (offset === 0 ? '<link rel="next" href="?type=airing&amp;limit=50">' : '') };
+  }});
+  const rows = await mal.getTopAnime(20, 'airing');
+  assert.equal(rows.length, 100);
+  assert.equal(rows[50].rank, null);
+  assert.equal(rows[99].mal_id, 100);
+  assert.deepEqual(offsets, [0, 50]);
+});
+
+test('MAL terminal 404 preserves valid pages; unrelated errors still reject', async () => {
+  let unrelated = false;
+  const mal = loadService('mal', { 'node-fetch': async (url) => {
+    if (url.startsWith('https://api.jikan.moe/')) return { ok: false, status: 502 };
+    if (new URL(url).searchParams.get('limit') === '0') return { ok: true, text: async () => Array.from({ length: 50 }, (_, i) => rankingRow(i + 1, i + 1)).join('') + '<link rel="next" href="?limit=50">' };
+    return { ok: false, status: 404, text: async () => unrelated ? '<html>Gateway route not found</html>' : '<title>404 Not Found - MyAnimeList.net</title>' };
+  }});
+  assert.equal((await mal.getTopAnime(20, 'airing')).length, 50);
+  unrelated = true;
+  await assert.rejects(mal.getTopAnime(20), /MyAnimeList top error: 404/);
+});

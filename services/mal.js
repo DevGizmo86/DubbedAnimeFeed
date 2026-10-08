@@ -88,10 +88,10 @@ function parseMalRanking(html) {
   const rows = html.match(/<tr\b[^>]*class="[^"]*\branking-list\b[^"]*"[^>]*>[\s\S]*?<\/tr>/gi) || [];
   return rows.map((row) => {
     const id = row.match(/href="https:\/\/myanimelist\.net\/anime\/(\d+)\//);
-    const rank = row.match(/class="[^"]*top-anime-rank-text[^\"]*"[^>]*>\s*(\d+)/);
+    const rank = row.match(/class="[^"]*top-anime-rank-text[^\"]*"[^>]*>\s*(\d+|-)/);
     const title = row.match(/<h3\b[^>]*>[\s\S]*?<a\b[^>]*>([\s\S]*?)<\/a>/);
     if (!id || !rank) throw new Error("Invalid MyAnimeList ranking row");
-    return { mal_id: Number(id[1]), rank: Number(rank[1]), title: title ? title[1].replace(/<[^>]+>/g, "").trim() : "" };
+    return { mal_id: Number(id[1]), rank: rank[1] === "-" ? null : Number(rank[1]), title: title ? title[1].replace(/<[^>]+>/g, "").trim() : "" };
   });
 }
 
@@ -104,15 +104,20 @@ async function loadMalTop(maxPages, filter) {
       headers: { "User-Agent": UA, Accept: "text/html" },
       timeout: REQUEST_TIMEOUT_MS,
     });
-    if (!res.ok) throw new Error(`MyAnimeList top error: ${res.status}`);
     const html = await res.text();
+    // MAL returns its own 404 page for an offset past the ranking end.
+    if (res.status === 404 && list.length && /404 Not Found - MyAnimeList\.net/.test(html)) break;
+    if (!res.ok) throw new Error(`MyAnimeList top error: ${res.status}`);
     const page = parseMalRanking(html);
     if (!page.length) {
       if (list.length && /No anime found/i.test(html)) break;
       throw new Error("MyAnimeList ranking unavailable or unrecognized");
     }
     list.push(...page);
-    if (page.length < MAL_PAGE_SIZE) break;
+    // A full final page can contain unranked entries (rank "-").
+    // Follow the actual pagination rather than probing another empty offset.
+    const hasNext = /<link\b[^>]*rel="next"[^>]*>/i.test(html) || /<a\b[^>]*class="[^"]*\bnext\b[^"]*"[^>]*>/i.test(html);
+    if (page.length < MAL_PAGE_SIZE || !hasNext) break;
     if (offset + MAL_PAGE_SIZE < target) await sleep(REQUEST_DELAY_MS);
   }
   const result = list.slice(0, target);
