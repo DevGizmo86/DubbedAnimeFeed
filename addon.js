@@ -22,7 +22,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.5.6",
+  version: "1.5.7",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -37,6 +37,13 @@ const manifest = {
   // synopses and episode names are fetched from TMDB in Italian; without it the
   // addon still works, falling back to AnimeUnity's Italian text + Kitsu.
   config: [
+    {
+      key: "posterOrientation",
+      type: "select",
+      title: "Orientamento immagini — tutti i cataloghi",
+      options: ["portrait", "landscape"],
+      default: "portrait",
+    },
     {
       key: "tmdbKey",
       type: "text",
@@ -140,7 +147,15 @@ builder.defineCatalogHandler(async ({ type, id, extra, config }) => {
   }
 
   debug(`← catalog response  ${metas.length} meta(s) (skip=${skip})`);
-  return { metas };
+  // Clone previews so one installation's choice cannot alter shared caches.
+  const landscape = config && config.posterOrientation === "landscape";
+  return {
+    metas: metas.map((meta) => ({
+      ...meta,
+      poster: landscape ? meta.background || meta.poster : meta.poster,
+      posterShape: landscape ? "landscape" : "poster",
+    })),
+  };
 });
 
 builder.defineMetaHandler(async ({ type, id, config }) => {

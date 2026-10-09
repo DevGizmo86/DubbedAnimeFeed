@@ -170,3 +170,12 @@ quel titolo. In caso di errore o timeout vengono mantenuti i dati Kitsu.
 Il collegamento degli episodi avviene per ID esatto, senza cambiare numerazione
 né ID delle fonti. La chiave TMDB opzionale nell'addon mantiene la priorità
 per le traduzioni italiane; la chiave impostata in Nuvio è usata dall'app.
+
+
+### Orientamento immagini (1.5.7)
+
+Nella pagina di configurazione scegli `portrait` (verticale, predefinito) o
+`landscape` (orizzontale). La scelta si applica a tutti i cataloghi, ricerca
+compresa. Landscape usa l'immagine di copertina orizzontale del titolo, se
+disponibile, e altrimenti la locandina. Installa il link generato dalla nuova
+configurazione per applicare la scelta.
