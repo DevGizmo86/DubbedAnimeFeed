@@ -183,3 +183,29 @@ Nella pagina di configurazione scegli `portrait` (verticale, predefinito) o
 compresa. Landscape usa l'immagine di copertina orizzontale del titolo, se
 disponibile, e altrimenti la locandina. Installa il link generato dalla nuova
 configurazione per applicare la scelta.
+
+### Indicazione episodi doppiati (1.5.9)
+
+Nella scheda fornita dall'addon gli episodi confermati doppiati vengono mostrati
+con il prefisso **`[ITA]`** nel titolo, ad esempio `[ITA] Titolo dell'episodio`.
+L'indicazione viene applicata dopo le traduzioni TMDB, anche quando i metadati
+Kitsu sono già in cache. ID, stagione, numero episodio e collegamento alle fonti
+di riproduzione restano invariati.
+
+Il controllo unisce i numeri effettivamente presenti nelle liste episodi delle
+schede doppiate AnimeUnity e AnimeWorld e quelli osservati nei feed doppiati
+recenti. Non viene mai dedotto un intervallo completo dal conteggio o dall'ultimo
+episodio: eventuali buchi restano senza indicazione. Per AnimeWorld è richiesto
+il campo audio `Italiano`; le ricerche dei titoli dei cataloghi Top sono validate
+tramite ID MyAnimeList/AniList, rifiutando corrispondenze contraddittorie.
+
+I controlli sono condivisi fra richieste simultanee, con cache di 10 minuti
+separata dalla cache delle traduzioni. Controlli senza conferme ritentano dopo
+un minuto; un guasto non impedisce di aprire la scheda. Speciali, numeri
+frazionari/intervalli e numerazioni senza corrispondenza esatta restano senza
+prefisso. Le conferme scadute non vengono mantenute indefinitamente.
+
+**Senza `[ITA]` significa “non verificato”, non “doppiaggio assente”.** Il prefisso
+conferma la presenza su almeno una fonte monitorata e non garantisce che gli
+addon di streaming installati trovino una sorgente italiana riproducibile.
+La visualizzazione richiede che Nuvio/Stremio usi la scheda del nostro addon.

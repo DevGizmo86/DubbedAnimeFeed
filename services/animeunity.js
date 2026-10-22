@@ -3,6 +3,7 @@ const debug = require("../debug");
 const { getTopAnime } = require("./mal");
 const tmdb = require("./tmdb");
 const animeworld = require("./animeworld");
+const episodeNumber = require("./episode-numbers");
 
 const AU_BASE = "https://www.animeunity.so";
 const KITSU_API = "https://kitsu.io/api/edge";
@@ -136,10 +137,16 @@ async function collectDubbedAnime() {
     for (const item of items) {
       const anime = item.anime;
       if (!anime || ![1, "1", true].includes(anime.dub)) continue;
-      if (seen.has(anime.id)) continue;
+      const number = episodeNumber(item.number);
+      if (seen.has(anime.id)) {
+        const previous = ordered.find((record) => record.id === anime.id);
+        if (number && !previous._confirmedDubbedEpisodes.includes(number)) previous._confirmedDubbedEpisodes.push(number);
+        continue;
+      }
       seen.add(anime.id);
       // Remember the latest episode number/date for display.
-      ordered.push({ ...anime, _latestEpisode: item.number, _episodeAt: item.created_at });
+      ordered.push({ ...anime, _latestEpisode: item.number, _episodeAt: item.created_at,
+        _confirmedDubbedEpisodes: number ? [number] : [], _observedAt: Date.now() });
     }
 
     if (ordered.length >= TARGET_ANIME) break;
@@ -241,6 +248,20 @@ function cleanPlot(anime) {
 // (which only receives a kitsu id) can show Italian text instead of Kitsu's
 // English synopsis. Populated whenever we map records to metas.
 const italianMetaCache = new Map(); // kitsuId → { name, description }
+const dubbedSources = new Map(); // kitsuId → source records, scoped to exact mappings
+
+function getDubbedSources(kitsuId) {
+  return (dubbedSources.get(String(kitsuId)) || [])
+    .filter((entry) => Date.now() - entry.at < SOURCE_STALE_MS);
+}
+
+function rememberDubbedSource(kitsuId, record) {
+  const source = String(record.id).startsWith("aw:") ? "AnimeWorld" : "AnimeUnity";
+  const entries = getDubbedSources(kitsuId).filter((entry) => entry.source !== source || entry.record.id !== record.id);
+  entries.push({ source, record, at: Date.now() });
+  if (dubbedSources.size >= 2000) dubbedSources.delete(dubbedSources.keys().next().value);
+  dubbedSources.set(String(kitsuId), entries);
+}
 
 function getItalianMeta(kitsuId) {
   return italianMetaCache.get(String(kitsuId)) || null;
@@ -278,6 +299,7 @@ async function recordsToMetas(records) {
         debug(`No Kitsu mapping for "${cleanTitle(a)}" (au id ${a.id})`);
         return null;
       }
+      rememberDubbedSource(kitsuId, a);
       const name = cleanTitle(a);
       const description = cleanPlot(a);
       // Remember the Italian title/plot so the meta handler (kitsu id only) can
@@ -703,10 +725,48 @@ async function getTopAiringDubbedCatalog(skip, tmdbKey) {
   return localizePage(all.slice(start, start + CATALOG_PAGE_SIZE), tmdbKey);
 }
 
+// The metadata endpoint returns actual episode records in windows of 120.
+// A total/count only bounds requests; it never confirms episodes by itself.
+async function getDubbedEpisodes(record, total) {
+  if (!/^\d+$/.test(String(record.id))) return [];
+  const slug = typeof record.slug === "string" && /^[\w-]+$/.test(record.slug) ? `-${record.slug}` : "";
+  const apiId = `${record.id}${slug}`;
+  const deadline = Date.now() + 10000;
+  const numbers = new Set();
+  const count = Math.min(3600, Math.max(1, Number(total) || 0));
+  for (let start = 1; start <= count && Date.now() < deadline; start += 120) {
+    const end = Math.min(start + 119, count);
+    let json;
+    try {
+      const response = await fetch(`${AU_BASE}/info_api/${apiId}/0?start_range=${start}&end_range=${end}`, {
+        headers: { "User-Agent": UA, Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+        timeout: Math.max(1, Math.min(5000, deadline - Date.now())),
+      });
+      if (!response.ok) throw new Error(`AnimeUnity episode metadata error: ${response.status}`);
+      json = await response.json();
+      if (!Array.isArray(json.episodes)) throw new Error("Invalid AnimeUnity episode list");
+    } catch (error) {
+      if (!numbers.size) throw error;
+      debug(`AnimeUnity episode page unavailable: ${error.message}`);
+      break;
+    }
+    for (const episode of json.episodes) {
+      if (episode.anime_id != null && String(episode.anime_id) !== String(record.id)) continue;
+      if (!episode.id || [false, 0, "0"].includes(episode.is_uploaded) || [false, 0, "0"].includes(episode.available)) continue;
+      const number = episodeNumber(episode.number);
+      if (number) numbers.add(number);
+    }
+    if (!json.episodes.length) break;
+  }
+  return [...numbers];
+}
+
 module.exports = {
   getDubbedCatalog,
   searchDubbedCatalog,
   getTopDubbedCatalog,
   getTopAiringDubbedCatalog,
   getItalianMeta,
+  getDubbedSources,
+  getDubbedEpisodes,
 };

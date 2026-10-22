@@ -70,6 +70,9 @@ Module._load = function (request, parent, isMain) {
       }),
     };
     if (request === "./animeunity") return { getItalianMeta: () => null };
+    if (request === "./dubbed-episodes") return {
+      annotateDubbedEpisodes: async (meta) => ({ ...meta, videos: meta.videos?.map((video, i) => i ? video : { ...video, title: `[ITA] ${video.title}` }) }),
+    };
     if (request === "../debug") return () => {};
   }
   return originalLoad.call(this, request, parent, isMain);
@@ -117,6 +120,17 @@ test("TMDB cast and trailers survive Italian metadata overlay", async () => {
   assert.equal(meta.trailers[0].ytId, "RH-FcW94z00");
 });
 
+test("Italian episode labels are applied after TMDB localization on cold and cached metadata", async () => {
+  for (let i = 0; i < 2; i++) {
+    const meta = await getKitsuMeta("999", "series", "sample-key");
+    assert.equal(meta.videos[0].title, "[ITA] TMDB 1");
+    assert.equal(meta.videos[1].title, "TMDB 2");
+    assert.equal(meta.videos[0].id, "kitsu:999:1");
+    assert.equal(meta.videos[0].episode, 1);
+    assert.equal(meta.videos[0].season, 1);
+  }
+});
+
 test("manifest uses standard catalog types while keeping legacy anime metadata", () => {
   const { manifest } = require("../addon");
   assert.deepEqual(manifest.types, ["series", "movie", "anime"]);
@@ -130,7 +144,7 @@ test("keyless supplemental metadata supplies Italian plots without changing epis
   assert.equal(meta.videos[0].id, "kitsu:888:1");
   assert.equal(meta.videos[0].season, 1);
   assert.equal(meta.videos[0].episode, 1);
-  assert.equal(meta.videos[0].title, "Kitsu 1");
+  assert.equal(meta.videos[0].title, "[ITA] Kitsu 1");
   assert.deepEqual(meta.cast, ["Provider actor"]);
 });
 
