@@ -2,6 +2,7 @@ const fetch = require("node-fetch");
 const debug = require("../debug");
 const { getItalianMeta } = require("./animeunity");
 const tmdb = require("./tmdb");
+const { annotateDubbedEpisodes } = require("./dubbed-episodes");
 
 const KITSU_API = "https://kitsu.io/api/edge";
 const UA =
@@ -240,7 +241,8 @@ async function withItalian(base, info, kitsuId, tmdbKey) {
 async function getKitsuMeta(kitsuId, type, tmdbKey) {
   const cached = metaCache.get(kitsuId);
   if (cached && Date.now() - cached.builtAt < META_TTL_MS) {
-    return withItalian({ ...cached.meta, type }, cached.info, kitsuId, tmdbKey);
+    const localized = await withItalian({ ...cached.meta, type }, cached.info, kitsuId, tmdbKey);
+    return annotateDubbedEpisodes(localized, kitsuId, cached.info);
   }
 
   const json = await kitsuGet(`/anime/${kitsuId}?include=categories`);
@@ -304,7 +306,8 @@ async function getKitsuMeta(kitsuId, type, tmdbKey) {
 
   metaCache.set(kitsuId, { meta, info, builtAt: Date.now() });
   debug(`getKitsuMeta: ${kitsuId} "${meta.name}" videos=${meta.videos ? meta.videos.length : 0}`);
-  return withItalian(meta, info, kitsuId, tmdbKey);
+  const localized = await withItalian(meta, info, kitsuId, tmdbKey);
+  return annotateDubbedEpisodes(localized, kitsuId, info);
 }
 
 module.exports = { getKitsuMeta };

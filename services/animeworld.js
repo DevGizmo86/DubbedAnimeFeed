@@ -1,13 +1,16 @@
 const fetch = require("node-fetch");
 const cheerio = require("cheerio");
 const debug = require("../debug");
+const episodeNumber = require("./episode-numbers");
 
 // Only metadata is requested: homepage and title pages, never video servers.
 const BASE = "https://www.animeworld.ac";
-const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.8)";
+const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.9)";
 const DETAIL_TTL = 12 * 60 * 60 * 1000;
 const details = new Map();
 const pending = new Map();
+const episodeDetails = new Map();
+const EPISODE_TTL = 10 * 60 * 1000;
 
 async function html(url, timeout = 10000) {
   const response = await fetch(url, {
@@ -30,7 +33,13 @@ function parseFeed(text) {
     if (!card.find(".dub").length) return;
     const link = card.find("a.name").first();
     const match = (link.attr("href") || "").match(/^\/play\/([^/?#]+)/);
-    if (!match || seen.has(match[1])) return;
+    if (!match) return;
+    const number = episodeNumber(card.find(".ep").first().text().replace(/^\s*Ep\s*/i, ""));
+    if (seen.has(match[1])) {
+      const previous = records.find((record) => record.id === `aw:${match[1]}`);
+      if (number && !previous._confirmedDubbedEpisodes.includes(number)) previous._confirmedDubbedEpisodes.push(number);
+      return;
+    }
     seen.add(match[1]);
     records.push({
       id: `aw:${match[1]}`,
@@ -38,6 +47,8 @@ function parseFeed(text) {
       title: link.text().trim(),
       imageurl: card.find("img").first().attr("src"),
       _latestEpisode: card.find(".ep").first().text().replace(/^\s*Ep\s*/i, "").trim(),
+      _confirmedDubbedEpisodes: number ? [number] : [],
+      _observedAt: Date.now(),
     });
   });
   if (!records.length) throw new Error("AnimeWorld dubbed feed is empty");
@@ -68,12 +79,23 @@ function parseDetail(text) {
   const title = $(".widget.info h2.title").first().text().trim();
   const description = $('meta[name="description"]').attr("content") || "";
   const prefix = `Trama di ${title} ITA: `;
+  // The title suffix alone is insufficient: require the actual audio field.
+  const dubbed = field("Audio:").toLowerCase() === "italiano";
+  const episodes = new Set();
+  if (dubbed) {
+    $("ul.episodes li.episode a[data-episode-num][href]").each((_, element) => {
+      const number = episodeNumber($(element).attr("data-episode-num"));
+      if (number && /^\/play\/[^/]+\/[^/?#]+$/.test($(element).attr("href") || "")) episodes.add(number);
+    });
+  }
   return {
     mal_id, anilist_id, type: types[category],
     plot: description.startsWith(prefix) ? description.slice(prefix.length) : description,
     // This is the anime's release year, NOT the latest dubbed episode's date.
     date: field("Data di Uscita:").match(/\b(?:19|20)\d{2}\b/)?.[0],
     score: $(".widget.info .rating[data-value]").attr("data-value"),
+    _dubbed: dubbed,
+    _dubbedEpisodes: [...episodes],
   };
 }
 
@@ -85,11 +107,64 @@ function getDetail(url, timeout) {
       // Bound the process cache even when the feed changes for many months.
       if (details.size >= 1000) details.delete(details.keys().next().value);
       details.set(url, { value, at: Date.now() });
+      rememberEpisodes(url, value);
       return value;
     }).finally(() => pending.delete(url));
     pending.set(url, request);
   }
   return pending.get(url);
+}
+
+function rememberEpisodes(url, value) {
+  if (episodeDetails.size >= 1000) episodeDetails.delete(episodeDetails.keys().next().value);
+  episodeDetails.set(url, { value, at: Date.now() });
+}
+
+function matchesExternalId(detail, expected) {
+  const keys = ["mal_id", "anilist_id"].filter((key) => expected[key] && detail[key]);
+  // Reject contradictory IDs even when the title text happens to match.
+  return keys.length > 0 && keys.every((key) => String(expected[key]) === String(detail[key]));
+}
+
+function parseSearch(text) {
+  const $ = cheerio.load(text);
+  const urls = new Set();
+  $(".film-list .item").each((_, element) => {
+    const card = $(element);
+    if (!card.find(".dub").length) return;
+    const match = (card.find("a.name").attr("href") || "").match(/^\/play\/([^/?#]+)$/);
+    if (match) urls.add(`${BASE}/play/${match[1]}`);
+  });
+  return [...urls].slice(0, 4);
+}
+
+async function getDubbedEpisodes(record, titles = []) {
+  const deadline = Date.now() + 10000;
+  const read = async (url) => {
+    const cached = episodeDetails.get(url);
+    if (cached && Date.now() - cached.at < EPISODE_TTL) return cached.value;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("AnimeWorld episode lookup timed out");
+    const value = parseDetail(await html(url, Math.min(5000, remaining)));
+    rememberEpisodes(url, value);
+    return value;
+  };
+  if (record.id && /^aw:[\w.-]+$/.test(String(record.id))) {
+    const value = await read(`${BASE}/play/${String(record.id).slice(3)}`);
+    return value._dubbed && matchesExternalId(value, record) ? value._dubbedEpisodes : [];
+  }
+  if (!record.mal_id && !record.anilist_id) return [];
+  const query = titles.find((title) => typeof title === "string" && title.trim());
+  if (!query) return [];
+  const urls = parseSearch(await html(`${BASE}/search?keyword=${encodeURIComponent(query.replace(/\s*\(ITA\)\s*$/i, "").trim())}`, 5000));
+  const results = await Promise.allSettled(urls.map(read));
+  const numbers = new Set();
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value._dubbed && matchesExternalId(result.value, record)) {
+      result.value._dubbedEpisodes.forEach((number) => numbers.add(number));
+    }
+  }
+  return [...numbers];
 }
 
 async function getDubbedRecords() {
@@ -114,4 +189,4 @@ async function getDubbedRecords() {
   return records;
 }
 
-module.exports = { getDubbedRecords, parseFeed, parseDetail };
+module.exports = { getDubbedRecords, getDubbedEpisodes, parseFeed, parseDetail, parseSearch, episodeNumber };
