@@ -22,6 +22,7 @@ const { getRouter } = require("stremio-addon-sdk");
 const landingTemplate = require("stremio-addon-sdk/src/landingTemplate");
 const addonInterface = require("./addon");
 const {
+  getDubbedCatalog,
   getTopDubbedCatalog,
   getTopAiringDubbedCatalog,
 } = require("./services/animeunity");
@@ -114,6 +115,13 @@ app.listen(PORT, () => {
   // right after, so it reuses the dubbed-archive index instead of racing a
   // second walk in parallel.
   const tmdbKey = process.env.TMDB_API_KEY || null;
+  // Warm both latest catalogs with one shared two-source load. This is
+  // independent of the archive/MAL warm-up, so an AnimeUnity outage cannot
+  // prevent AnimeWorld's recent dubbed titles from appearing.
+  Promise.all([
+    getDubbedCatalog("series", 0, tmdbKey),
+    getDubbedCatalog("movie", 0, tmdbKey),
+  ]).catch((err) => console.error("Pre-build latest catalog fallito:", err.message));
   getTopDubbedCatalog("series", 0, tmdbKey)
     .catch((err) => console.error("Pre-build top catalog fallito:", err.message))
     .then(() => getTopAiringDubbedCatalog(0, tmdbKey))

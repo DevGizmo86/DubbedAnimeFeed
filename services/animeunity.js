@@ -2,6 +2,7 @@ const fetch = require("node-fetch");
 const debug = require("../debug");
 const { getTopAnime } = require("./mal");
 const tmdb = require("./tmdb");
+const animeworld = require("./animeworld");
 
 const AU_BASE = "https://www.animeunity.so";
 const KITSU_API = "https://kitsu.io/api/edge";
@@ -20,13 +21,20 @@ const TARGET_ANIME = 60;
 // Distinct dubbed anime from the latest-episodes feed (raw records, before the
 // Kitsu mapping) are cached so the series and movie catalogs share one walk.
 let feedRecordsCache = null; // { records, builtAt }
+let feedRecordsPending = null;
+let feedRetryAt = 0;
+const sourceSnapshots = new Map();
+const SOURCE_STALE_MS = 24 * 60 * 60 * 1000;
+const FEED_RETRY_MS = 60 * 1000;
 const CATALOG_TTL_MS = 10 * 60 * 1000; // 10 minutes
 // Mapped Stremio metas split by kind ("series" vs "movie"), cached separately.
 const feedMetaCache = { series: null, movie: null }; // kind → { metas, builtAt }
+const feedMetaPending = {};
 
 // Kitsu mappings are static, so cache them for the whole process lifetime.
 // Key: "anilist/anime:889" or "myanimelist/anime:889" → kitsu id (or null).
 const kitsuCache = new Map();
+const kitsuPending = new Map();
 
 // Search results (the "all dubbed anime" search-only catalog) are cached per
 // normalized query, so paging through results doesn't re-hit AnimeUnity.
@@ -81,27 +89,26 @@ function decodeEntities(s) {
 // The homepage (and ?page=N) embeds the latest-episodes feed as a Laravel
 // paginator in <layout-items items-json="...">. Fetch a page and return its
 // episode array (each item carries a nested `anime` object).
-async function fetchFeedPage(page) {
+async function fetchFeedPage(page, timeout = 15000) {
   const url = page > 1 ? `${AU_BASE}/?page=${page}` : `${AU_BASE}/`;
   debug(`AnimeUnity: feed page ${page}`);
   const res = await fetch(url, {
     headers: { "User-Agent": UA, Accept: "text/html" },
-    timeout: 15000,
+    timeout,
   });
   if (!res.ok) throw new Error(`AnimeUnity feed error: ${res.status}`);
 
   const html = await res.text();
   const m = html.match(/<layout-items[^>]*items-json="([^"]*)"/);
   if (!m) {
-    debug(`AnimeUnity: no items-json on page ${page}`);
-    return [];
+    throw new Error(`AnimeUnity: no items-json on page ${page}`);
   }
   try {
     const json = JSON.parse(decodeEntities(m[1]));
-    return Array.isArray(json.data) ? json.data : [];
+    if (!Array.isArray(json.data)) throw new Error("Missing feed data array");
+    return json.data;
   } catch (err) {
-    debug(`AnimeUnity: failed to parse feed page ${page}: ${err.message}`);
-    return [];
+    throw new Error(`AnimeUnity: failed to parse feed page ${page}: ${err.message}`);
   }
 }
 
@@ -112,12 +119,15 @@ async function fetchFeedPage(page) {
 async function collectDubbedAnime() {
   const ordered = [];
   const seen = new Set();
+  const deadline = Date.now() + 20000;
 
   for (let page = 1; page <= MAX_FEED_PAGES; page++) {
+    if (Date.now() >= deadline) break;
     let items;
     try {
-      items = await fetchFeedPage(page);
+      items = await fetchFeedPage(page, Math.max(1, Math.min(15000, deadline - Date.now())));
     } catch (err) {
+      if (!ordered.length) throw err;
       debug(`AnimeUnity: stopping feed walk at page ${page}: ${err.message}`);
       break;
     }
@@ -125,7 +135,7 @@ async function collectDubbedAnime() {
 
     for (const item of items) {
       const anime = item.anime;
-      if (!anime || anime.dub !== 1) continue;
+      if (!anime || ![1, "1", true].includes(anime.dub)) continue;
       if (seen.has(anime.id)) continue;
       seen.add(anime.id);
       // Remember the latest episode number/date for display.
@@ -136,6 +146,7 @@ async function collectDubbedAnime() {
   }
 
   debug(`AnimeUnity: collected ${ordered.length} distinct dubbed anime`);
+  if (!ordered.length) throw new Error("AnimeUnity dubbed feed is empty");
   return ordered;
 }
 
@@ -145,7 +156,15 @@ async function mapToKitsu(externalSite, externalId) {
   if (!externalId) return null;
   const cacheKey = `${externalSite}:${externalId}`;
   if (kitsuCache.has(cacheKey)) return kitsuCache.get(cacheKey);
+  if (!kitsuPending.has(cacheKey)) {
+    const request = loadKitsuMapping(externalSite, externalId, cacheKey)
+      .finally(() => kitsuPending.delete(cacheKey));
+    kitsuPending.set(cacheKey, request);
+  }
+  return kitsuPending.get(cacheKey);
+}
 
+async function loadKitsuMapping(externalSite, externalId, cacheKey) {
   const url =
     `${KITSU_API}/mappings?filter[externalSite]=${encodeURIComponent(externalSite)}` +
     `&filter[externalId]=${encodeURIComponent(externalId)}&include=item`;
@@ -314,29 +333,102 @@ async function localizePage(metas, tmdbKey) {
   );
 }
 
-// Distinct dubbed anime from the feed (raw records, ordered by latest episode),
-// cached so the series and movie catalogs share a single feed walk.
-async function getFeedRecords() {
+// Raw records from both feeds, with a shared load for series and movies.
+function getFeedRecords() {
   if (feedRecordsCache && Date.now() - feedRecordsCache.builtAt < CATALOG_TTL_MS) {
-    return feedRecordsCache.records;
+    return Promise.resolve(feedRecordsCache);
   }
-  const records = await collectDubbedAnime();
-  feedRecordsCache = { records, builtAt: Date.now() };
+  if (Date.now() < feedRetryAt) {
+    if (feedRecordsCache && Date.now() - feedRecordsCache.builtAt < SOURCE_STALE_MS) return Promise.resolve(feedRecordsCache);
+    return Promise.reject(new Error("Latest dubbed sources temporarily unavailable"));
+  }
+  if (!feedRecordsPending) {
+    feedRecordsPending = loadFeedRecords().finally(() => { feedRecordsPending = null; });
+  }
+  return feedRecordsPending;
+}
+
+// The verified AnimeWorld feed exposes no publication timestamps. Interleave
+// source rankings instead of comparing AU timestamps with invented AW dates.
+// Fresh sources precede
+// last-known source snapshots, which are retained for at most 24 hours.
+function interleave(lists) {
+  const records = [];
+  const length = Math.max(0, ...lists.map((list) => list.length));
+  for (let index = 0; index < length; index++) {
+    for (const list of lists) if (list[index]) records.push(list[index]);
+  }
   return records;
+}
+
+async function loadFeedRecords() {
+  const sources = ["AnimeUnity", "AnimeWorld"];
+  const results = await Promise.allSettled([
+    collectDubbedAnime(), animeworld.getDubbedRecords(),
+  ]);
+  const fresh = [];
+  const stale = [];
+  const now = Date.now();
+  results.forEach((result, index) => {
+    const source = sources[index];
+    if (result.status === "fulfilled" && result.value.length) {
+      const records = result.value.map((record) => ({ ...record, _source: source }));
+      sourceSnapshots.set(source, { records, builtAt: now });
+      fresh.push(records);
+    } else {
+      console.error(`${source} latest feed unavailable: ${result.reason?.message || "empty feed"}`);
+      const snapshot = sourceSnapshots.get(source);
+      if (snapshot && now - snapshot.builtAt < SOURCE_STALE_MS) stale.push(snapshot.records);
+    }
+  });
+  if (!fresh.length) {
+    feedRetryAt = now + FEED_RETRY_MS;
+    // Keep the previous catalog's age, so later failures never extend its life.
+    if (feedRecordsCache && now - feedRecordsCache.builtAt < SOURCE_STALE_MS) {
+      const validSources = new Set(stale.flat().map((record) => record._source));
+      feedRecordsCache = {
+        ...feedRecordsCache,
+        records: feedRecordsCache.records.filter((record) => validSources.has(record._source)),
+      };
+      return feedRecordsCache;
+    }
+    throw new Error("All latest dubbed sources unavailable");
+  }
+  feedRetryAt = 0;
+  feedRecordsCache = { records: [...interleave(fresh), ...interleave(stale)], builtAt: now };
+  return feedRecordsCache;
 }
 
 // Build the latest-dubbed catalog for one kind ("series" | "movie"): the feed
 // records filtered by kind, turned into Stremio meta previews with Kitsu ids.
 // Cached per kind for CATALOG_TTL_MS.
-async function buildCatalog(kind) {
+function buildCatalog(kind) {
   const cached = feedMetaCache[kind];
   if (cached && Date.now() - cached.builtAt < CATALOG_TTL_MS) {
-    return cached.metas;
+    return Promise.resolve(cached.metas);
   }
-  const records = filterByKind(await getFeedRecords(), kind);
-  const metas = await recordsToMetas(records);
-  feedMetaCache[kind] = { metas, builtAt: Date.now() };
-  debug(`buildCatalog(${kind}): ${metas.length} kitsu meta(s) cached`);
+  if (!feedMetaPending[kind]) {
+    feedMetaPending[kind] = loadCatalog(kind).catch((error) => {
+      if (cached && Date.now() - cached.builtAt < SOURCE_STALE_MS) return cached.metas;
+      throw error;
+    }).finally(() => { delete feedMetaPending[kind]; });
+  }
+  return feedMetaPending[kind];
+}
+
+async function loadCatalog(kind) {
+  const feed = await getFeedRecords();
+  const records = filterByKind(feed.records, kind);
+  const mapped = await recordsToMetas(records);
+  if (records.length && !mapped.length) throw new Error("Kitsu mappings unavailable for latest catalog");
+  const seen = new Set();
+  const metas = mapped.filter((meta) => {
+    if (seen.has(meta.id)) return false;
+    seen.add(meta.id);
+    return true;
+  });
+  feedMetaCache[kind] = { metas, builtAt: feed.builtAt };
+  debug(`buildCatalog(${kind}): ${metas.length} distinct kitsu meta(s) cached`);
   return metas;
 }
 

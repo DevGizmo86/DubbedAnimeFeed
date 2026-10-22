@@ -1,12 +1,12 @@
 # Anime Doppiati ITA
 
-Addon per [Stremio](https://www.stremio.com/) che pubblica i **cataloghi di anime doppiati in italiano**, usando come fonte [AnimeUnity](https://www.animeunity.so/).
+Addon per [Stremio](https://www.stremio.com/) che pubblica i **cataloghi di anime doppiati in italiano**. Le ultime uscite combinano [AnimeUnity](https://www.animeunity.so/) e [AnimeWorld](https://www.animeworld.ac/); classifiche e ricerca usano l'archivio AnimeUnity.
 
 ## Cosa fa
 
 L'addon aggiunge a Stremio quattro cataloghi:
 
-- **`Ultime uscite doppiate ITA`** — elenca gli anime con doppiaggio italiano **ordinati per uscita dell'ultimo episodio**: il primo elemento è l'anime il cui episodio doppiato è uscito più di recente. È mostrato nella home.
+- **Ultime uscite doppiate ITA** — i cataloghi `Ultime serie doppiate ITA` e `Ultimi film doppiati ITA` combinano i feed doppiati di entrambe le fonti, senza duplicati, con ordine di recenza approssimativo. Sono mostrati nella home.
 - **`Top anime doppiati ITA`** — la **classifica top di [MyAnimeList](https://myanimelist.net/topanime.php)** filtrata ai soli titoli **disponibili doppiati ITA** su AnimeUnity, mantenendo l'ordine di ranking MAL. È mostrato nella home.
 - **`Top anime in onda ITA`** — la **classifica degli anime attualmente in onda di [MyAnimeList](https://myanimelist.net/topanime.php?type=airing)** filtrata ai soli titoli **disponibili doppiati ITA** su AnimeUnity, in ordine di ranking MAL. È mostrato solo nella home (non compare in ricerca).
 - **`Anime doppiati ITA` (solo ricerca)** — un catalogo **globale** che permette di cercare fra **tutti** gli anime doppiati ITA presenti sull'archivio di AnimeUnity (non solo le ultime uscite). Non compare nella home: viene interrogato **solo quando fai una ricerca** dalla barra di Stremio.
@@ -19,10 +19,13 @@ L'addon **non riproduce video**: per le **fonti/streaming** serve un addon di st
 
 **Catalogo home (ultime uscite):**
 
-1. Scorre il feed "ultimi episodi" di AnimeUnity (paginatore embeddato in `<layout-items>` sulla home, via `?page=N`), che è ordinato per data di uscita degli episodi.
-2. Tiene solo gli episodi **doppiati** (`anime.dub === 1`) e deduplica per anime, mantenendo la prima occorrenza (la più recente): così l'ordine riflette quale anime ha avuto l'ultimo episodio doppiato per ultimo.
-3. Per ogni anime ricava l'id [Kitsu](https://kitsu.io/) tramite il suo `anilist_id` / `mal_id` (endpoint `mappings` di Kitsu, con cache).
-4. Restituisce a Stremio le anteprime del catalogo con id `kitsu:<id>`, poster, trama e voto. Il catalogo assemblato è in cache 10 minuti.
+1. Recupera in parallelo il feed "ultimi episodi" di AnimeUnity e la sezione **Dub-ITA** della home AnimeWorld. Ogni fonte ha un budget di recupero di 20 secondi; AnimeWorld recupera le schede con al massimo 6 richieste simultanee e conserva i dettagli validi per 12 ore.
+2. Tiene solo i doppiati e, in ciascun feed, la prima occorrenza di ogni anime. Le schede AnimeWorld forniscono ID MyAnimeList/AniList e categoria; le schede non riconosciute vengono saltate.
+3. Alterna le posizioni dei due feed (AU1, AW1, AU2, AW2, …), poi mappa su [Kitsu](https://kitsu.io/) e rimuove i duplicati per **ID Kitsu** prima della paginazione. Titoli diversi dello stesso anime non producono due locandine.
+4. L'ordine combinato è **approssimativo**: AnimeWorld non espone date di pubblicazione nel feed verificato. Non vengono inventate date né confrontati numeri episodio fra anime diversi. Non viene mantenuto uno storico persistente delle prime rilevazioni.
+5. Le due categorie condividono il recupero delle fonti, con cache di 10 minuti e pre-caricamento all'avvio. Se una fonte fallisce, i risultati freschi dell'altra precedono l'ultima copia disponibile della fonte fallita. Le copie delle fonti e l'ultimo catalogo valido sono conservati **in memoria**, per un massimo di 24 ore; si perdono al riavvio. Se entrambe falliscono, si ritenta dopo un minuto. Errori di fonte o indisponibilità totale dei mapping Kitsu non sono memorizzati come cataloghi vuoti.
+
+Questa integrazione riguarda solo le **ultime uscite**: i cataloghi Top e la ricerca continuano a dipendere dall'archivio AnimeUnity. ID cataloghi, ID Kitsu, configurazione e orientamento immagini restano compatibili.
 
 **Catalogo top (classifica MAL ∩ doppiati):**
 
@@ -145,6 +148,7 @@ DEBUG=1 node index.js
 - **[index.js](index.js)** — Server [Express](https://expressjs.com/) che monta il router dell'addon SDK, serve gli asset statici (logo e sfondo) da [assets/](assets/) e personalizza la pagina di landing/installazione.
 - **[addon.js](addon.js)** — Definisce il `manifest` (i tre cataloghi, tipi) e i gestori `catalog` e `meta` che rispondono alle richieste di Stremio. Il gestore `catalog` distingue fra catalogo ultime uscite, top e ricerca (`search` obbligatorio, così quest'ultimo non compare nella home).
 - **[services/animeunity.js](services/animeunity.js)** — Integrazione con AnimeUnity: lettura del feed "ultimi episodi", ricerca nell'archivio doppiato (endpoint `archivio/get-animes` con handshake CSRF), indice dell'archivio doppiato per `mal_id` (per il catalogo top), filtro dei doppiati e deduplica per anime, mapping verso gli id Kitsu e cache di cataloghi e ricerche.
+- **[services/animeworld.js](services/animeworld.js)** — Lettura dei metadati del feed Dub-ITA e delle schede AnimeWorld. I risultati confluiscono nelle ultime uscite gestite da `animeunity.js`, con deduplica per ID Kitsu. Non vengono interrogati server video.
 - **[services/mal.js](services/mal.js)** — Recupera la classifica top di MyAnimeList tramite l'API Jikan (`/top/anime`), con gestione del rate limit e cache.
 - **[services/kitsu.js](services/kitsu.js)** — Costruzione della scheda (meta) dall'API Kitsu: dettaglio anime, generi, lista episodi con video id `kitsu:<id>:<episodio>`, con cache.
 - **[debug.js](debug.js)** — Piccola utility di logging condizionata dalla variabile `DEBUG`.
