@@ -44,6 +44,12 @@ const PANEL_CSS = `
 .install-link {
   display: block;
 }
+.config-help {
+  font-size: 0.85em;
+  line-height: 1.5;
+  opacity: 0.85;
+  margin-top: 0.7em;
+}
 #installLink button,
 #copyManifestBtn {
   width: 100%;
@@ -56,6 +62,11 @@ const PANEL_CSS = `
 // it overrides the defaults without forking the SDK template.
 const landingHTML = landingTemplate(addonInterface.manifest)
   .replace("</style>", `${PANEL_CSS}</style>`)
+  .replace('id="onlyDubbedEpisodes"', 'id="onlyDubbedEpisodes" aria-describedby="dubbedEpisodesHelp"')
+  .replace(
+    /(<label for="onlyDubbedEpisodes">[\s\S]*?<\/label>)/,
+    '$1<p id="dubbedEpisodesHelp" class="config-help">La disponibilità in italiano si basa sulla presenza dell’episodio doppiato su AnimeWorld o AnimeUnity: basta la conferma di una delle due fonti. Se non è possibile verificare, manteniamo l’ultima verifica valida (fino a 24 ore); senza conferme mostriamo tutti gli episodi. La presenza sulle fonti non garantisce uno stream italiano negli addon installati.</p>'
+  )
   // Rename the default INSTALL button and add a "copy manifest link" button
   // (for manual installation) right after the install link.
   .replace(

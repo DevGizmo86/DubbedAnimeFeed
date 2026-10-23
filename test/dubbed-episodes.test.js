@@ -22,7 +22,7 @@ const meta = (numbers = [1, 2, 3, 4]) => ({
 });
 const source = (record = {}) => ({ source: "AnimeUnity", at: Date.now(), record: { id: 10, mal_id: 123, ...record } });
 
-function labels({ sources = () => [source()], au = async () => [], aw = async () => [], fetch } = {}) {
+function filter({ sources = () => [source()], au = async () => [], aw = async () => [], fetch } = {}) {
   return load("dubbed-episodes", {
     "./animeunity": { getDubbedSources: sources, getDubbedEpisodes: au },
     "./animeworld": { getDubbedEpisodes: aw },
@@ -30,76 +30,76 @@ function labels({ sources = () => [source()], au = async () => [], aw = async ()
   });
 }
 
-test("ITA labels use the union of exact episode lists, preserve holes and never mutate base metadata", async () => {
-  const service = labels({ au: async () => [1, 3], aw: async () => [3, 4] });
+test("the filter unions exact episode lists, preserves holes and never mutates base metadata", async () => {
+  const service = filter({ au: async () => [1, 3], aw: async () => [3, 4] });
   const base = meta();
   const before = structuredClone(base);
-  const result = await service.annotateDubbedEpisodes(base, "55", { titles: ["Example"] });
-  assert.deepEqual(result.videos.map((v) => v.title), ["[ITA] Titolo 1", "Titolo 2", "[ITA] Titolo 3", "[ITA] Titolo 4"]);
+  const result = await service.filterDubbedEpisodes(base, "55", { titles: ["Example"] });
+  assert.deepEqual(result.videos, [before.videos[0], before.videos[2], before.videos[3]]);
   assert.deepEqual(base, before);
-  assert.deepEqual(result.videos.map(({ title, ...v }) => v), before.videos.map(({ title, ...v }) => v));
   assert.deepEqual(result.cast, ["Actor"]);
 });
 
 test("a latest episode/count never implies that all previous episodes are dubbed", async () => {
-  const service = labels({
+  const service = filter({
     sources: () => [source({ _latestEpisode: "942", episodes_count: 1000, _observedAt: Date.now(), _confirmedDubbedEpisodes: [942] })],
     au: async () => { throw new Error("offline"); }, aw: async () => { throw new Error("offline"); },
   });
-  const result = await service.annotateDubbedEpisodes(meta([1, 941, 942, 943]), "55", {});
-  assert.deepEqual(result.videos.map((v) => v.title), ["Titolo 1", "Titolo 941", "[ITA] Titolo 942", "Titolo 943"]);
+  const result = await service.filterDubbedEpisodes(meta([1, 941, 942, 943]), "55", {});
+  assert.deepEqual(result.videos.map((v) => v.episode), [942]);
 });
 
 test("unverified identities, specials, fractions and different episode IDs stay untouched", async () => {
-  const service = labels({ aw: async () => [1, 2, "3.5", "4-5", 0] });
+  const service = filter({ aw: async () => [1, 2, "3.5", "4-5", 0] });
   const base = meta();
   base.videos[0].id = "tt999:1:1";
   base.videos[1].season = 0;
-  assert.deepEqual(await service.annotateDubbedEpisodes(base, "55", {}), base);
+  assert.deepEqual(await service.filterDubbedEpisodes(base, "55", {}), base);
 });
 
 test("source failures stay unconfirmed, retry quickly, and recover without rebuilding Kitsu metadata", async (t) => {
   let now = 1000000;
   t.mock.method(Date, "now", () => now);
   let offline = true;
-  const service = labels({ aw: async () => { if (offline) throw new Error("offline"); return [2]; } });
+  const service = filter({ aw: async () => { if (offline) throw new Error("offline"); return [2]; } });
   const base = meta();
-  assert.deepEqual(await service.annotateDubbedEpisodes(base, "55", {}), base);
+  assert.deepEqual(await service.filterDubbedEpisodes(base, "55", {}), base);
   offline = false;
   now += 60001;
-  const result = await service.annotateDubbedEpisodes(base, "55", {});
-  assert.equal(result.videos[1].title, "[ITA] Titolo 2");
+  const result = await service.filterDubbedEpisodes(base, "55", {});
+  assert.deepEqual(result.videos, [base.videos[1]]);
   assert.equal(base.videos[1].title, "Titolo 2");
 });
 
-test("expired positive evidence disappears when sources cannot confirm it again", async (t) => {
+test("source outages retain the last positive verification for at most 24 hours", async (t) => {
   let now = 1000000;
   t.mock.method(Date, "now", () => now);
   const observedAt = now;
   let offline = false;
-  const service = labels({
+  const service = filter({
     sources: () => [source({ _observedAt: observedAt, _confirmedDubbedEpisodes: [1] })],
     aw: async () => { if (offline) throw new Error("offline"); return [1]; },
   });
-  assert.equal((await service.annotateDubbedEpisodes(meta(), "55", {})).videos[0].title, "[ITA] Titolo 1");
+  assert.equal((await service.filterDubbedEpisodes(meta(), "55", {})).videos.length, 1);
   offline = true;
   now += 10 * 60 * 1000 + 1;
-  assert.equal((await service.annotateDubbedEpisodes(meta(), "55", {})).videos[0].title, "Titolo 1");
+  assert.equal((await service.filterDubbedEpisodes(meta(), "55", {})).videos.length, 1);
+  now += 24 * 60 * 60 * 1000;
+  assert.deepEqual(await service.filterDubbedEpisodes(meta(), "55", {}), meta());
 });
 
-test("concurrent metadata requests share availability checks and prefixes are not duplicated", async () => {
+test("concurrent metadata requests share availability checks and preserve original titles", async () => {
   let calls = 0;
-  const service = labels({ aw: async () => { calls++; return [1]; } });
+  const service = filter({ aw: async () => { calls++; return [1]; } });
   const base = meta();
-  base.videos[0].title = "[ITA] Titolo 1";
-  const results = await Promise.all(Array.from({ length: 3 }, () => service.annotateDubbedEpisodes(base, "55", {})));
+  const results = await Promise.all(Array.from({ length: 3 }, () => service.filterDubbedEpisodes(base, "55", {})));
   assert.equal(calls, 1);
-  assert(results.every((m) => m.videos[0].title === "[ITA] Titolo 1"));
+  assert(results.every((m) => m.videos.length === 1 && m.videos[0].title === "Titolo 1"));
 });
 
 test("reopening a title after restart resolves exact Kitsu external IDs before an AnimeWorld search", async () => {
   let identity;
-  const service = labels({
+  const service = filter({
     sources: () => [],
     fetch: async (url) => {
       assert.equal(url, "https://kitsu.io/api/edge/anime/55/mappings");
@@ -110,9 +110,9 @@ test("reopening a title after restart resolves exact Kitsu external IDs before a
     },
     aw: async (ids) => { identity = ids; return [3]; },
   });
-  const result = await service.annotateDubbedEpisodes(meta(), "55", { titles: ["Example"] });
+  const result = await service.filterDubbedEpisodes(meta(), "55", { titles: ["Example"] });
   assert.deepEqual(identity, { mal_id: "123", anilist_id: "456" });
-  assert.equal(result.videos[2].title, "[ITA] Titolo 3");
+  assert.deepEqual(result.videos.map((v) => v.episode), [3]);
 });
 
 const card = (slug, dub = true) => `<div class="item">${dub ? '<div class="dub">DUB</div>' : ''}<a class="name" href="/play/${slug}">Example (ITA)</a></div>`;
