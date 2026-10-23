@@ -22,7 +22,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.5.9",
+  version: "1.5.10",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -33,7 +33,7 @@ const manifest = {
   resources: ["catalog", "meta"],
   types: ["series", "movie", "anime"],
   idPrefixes: ["kitsu:"],
-  // Optional user configuration: a TMDB API key. When provided, titles,
+  // Optional display preferences and TMDB API key. When provided, titles,
   // synopses and episode names are fetched from TMDB in Italian; without it the
   // addon still works, falling back to AnimeUnity's Italian text + Kitsu.
   config: [
@@ -43,6 +43,11 @@ const manifest = {
       title: "Orientamento immagini — tutti i cataloghi",
       options: ["portrait", "landscape"],
       default: "portrait",
+    },
+    {
+      key: "onlyDubbedEpisodes",
+      type: "checkbox",
+      title: "Mostra solo episodi confermati ITA",
     },
     {
       key: "tmdbKey",
@@ -172,7 +177,9 @@ builder.defineMetaHandler(async ({ type, id, config }) => {
   const tmdbKey = (config && config.tmdbKey) || process.env.TMDB_API_KEY || null;
 
   try {
-    const meta = await getKitsuMeta(kitsuId, type, tmdbKey);
+    // HTML checkboxes serialize as "on"; also support JSON boolean configs.
+    const onlyDubbedEpisodes = [true, "true", "on"].includes(config && config.onlyDubbedEpisodes);
+    const meta = await getKitsuMeta(kitsuId, type, tmdbKey, { onlyDubbedEpisodes });
     debug(`← meta response  "${meta.name}"`);
     return { meta };
   } catch (err) {

@@ -71,7 +71,7 @@ Module._load = function (request, parent, isMain) {
     };
     if (request === "./animeunity") return { getItalianMeta: () => null };
     if (request === "./dubbed-episodes") return {
-      annotateDubbedEpisodes: async (meta) => ({ ...meta, videos: meta.videos?.map((video, i) => i ? video : { ...video, title: `[ITA] ${video.title}` }) }),
+      filterDubbedEpisodes: async (meta) => ({ ...meta, videos: meta.videos?.filter((video) => [1, 3].includes(video.episode)) }),
     };
     if (request === "../debug") return () => {};
   }
@@ -120,14 +120,17 @@ test("TMDB cast and trailers survive Italian metadata overlay", async () => {
   assert.equal(meta.trailers[0].ytId, "RH-FcW94z00");
 });
 
-test("Italian episode labels are applied after TMDB localization on cold and cached metadata", async () => {
-  for (let i = 0; i < 2; i++) {
-    const meta = await getKitsuMeta("999", "series", "sample-key");
-    assert.equal(meta.videos[0].title, "[ITA] TMDB 1");
-    assert.equal(meta.videos[1].title, "TMDB 2");
-    assert.equal(meta.videos[0].id, "kitsu:999:1");
-    assert.equal(meta.videos[0].episode, 1);
-    assert.equal(meta.videos[0].season, 1);
+test("the optional filter runs after TMDB expansion without contaminating full cached metadata", async () => {
+  for (const id of ["996", "999"]) {
+    for (let i = 0; i < 2; i++) {
+      const filtered = await getKitsuMeta(id, "series", "sample-key", { onlyDubbedEpisodes: true });
+      assert.deepEqual(filtered.videos.map((v) => [v.id, v.title, v.episode, v.season]), [
+        [`kitsu:${id}:1`, "TMDB 1", 1, 1], [`kitsu:${id}:3`, "TMDB 3", 3, 1],
+      ]);
+      const full = await getKitsuMeta(id, "series", "sample-key");
+      assert.equal(full.videos.length, 1205);
+      assert.equal(full.videos[1].title, "TMDB 2");
+    }
   }
 });
 
@@ -144,7 +147,7 @@ test("keyless supplemental metadata supplies Italian plots without changing epis
   assert.equal(meta.videos[0].id, "kitsu:888:1");
   assert.equal(meta.videos[0].season, 1);
   assert.equal(meta.videos[0].episode, 1);
-  assert.equal(meta.videos[0].title, "[ITA] Kitsu 1");
+  assert.equal(meta.videos[0].title, "Kitsu 1");
   assert.deepEqual(meta.cast, ["Provider actor"]);
 });
 

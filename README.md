@@ -184,28 +184,31 @@ compresa. Landscape usa l'immagine di copertina orizzontale del titolo, se
 disponibile, e altrimenti la locandina. Installa il link generato dalla nuova
 configurazione per applicare la scelta.
 
-### Indicazione episodi doppiati (1.5.9)
+### Filtro episodi doppiati (1.5.10)
 
-Nella scheda fornita dall'addon gli episodi confermati doppiati vengono mostrati
-con il prefisso **`[ITA]`** nel titolo, ad esempio `[ITA] Titolo dell'episodio`.
-L'indicazione viene applicata dopo le traduzioni TMDB, anche quando i metadati
-Kitsu sono già in cache. ID, stagione, numero episodio e collegamento alle fonti
-di riproduzione restano invariati.
+Nella pagina di configurazione puoi attivare **Mostra solo episodi confermati
+ITA**. L’opzione è disattivata per impostazione predefinita. Installa il link
+manifest generato per applicarla. Il prefisso `[ITA]` nei titoli è stato rimosso.
 
-Il controllo unisce i numeri effettivamente presenti nelle liste episodi delle
-schede doppiate AnimeUnity e AnimeWorld e quelli osservati nei feed doppiati
-recenti. Non viene mai dedotto un intervallo completo dal conteggio o dall'ultimo
-episodio: eventuali buchi restano senza indicazione. Per AnimeWorld è richiesto
-il campo audio `Italiano`; le ricerche dei titoli dei cataloghi Top sono validate
-tramite ID MyAnimeList/AniList, rifiutando corrispondenze contraddittorie.
+La disponibilità in italiano si basa sulla presenza dell’episodio doppiato su
+**AnimeWorld o AnimeUnity**: basta la conferma di una delle due fonti. Il controllo
+unisce i numeri effettivi delle liste episodi e dei feed doppiati recenti, senza
+dedurre intervalli dal conteggio o dall’ultimo episodio. Su AnimeWorld è richiesto
+l’audio Italiano e la corrispondenza degli ID MyAnimeList/AniList.
 
-I controlli sono condivisi fra richieste simultanee, con cache di 10 minuti
-separata dalla cache delle traduzioni. Controlli senza conferme ritentano dopo
-un minuto; un guasto non impedisce di aprire la scheda. Speciali, numeri
-frazionari/intervalli e numerazioni senza corrispondenza esatta restano senza
-prefisso. Le conferme scadute non vengono mantenute indefinitamente.
+Quando attivo, il filtro viene applicato dopo tutte le integrazioni di metadati,
+TMDB compreso. Mantiene titoli, ID, stagione e numerazione degli episodi conservati:
+se sono confermati 1 e 3, il 2 viene nascosto senza rinumerare il 3. Speciali e
+numerazioni senza corrispondenza esatta non sono considerati confermati.
 
-**Senza `[ITA]` significa “non verificato”, non “doppiaggio assente”.** Il prefisso
-conferma la presenza su almeno una fonte monitorata e non garantisce che gli
-addon di streaming installati trovino una sorgente italiana riproducibile.
-La visualizzazione richiede che Nuvio/Stremio usi la scheda del nostro addon.
+Le verifiche sono condivise fra richieste simultanee e aggiornate ogni 10 minuti.
+In caso di mancata conferma o errore viene mantenuta l’ultima verifica positiva
+per un massimo di 24 ore, con tentativi ogni minuto; la cache è in memoria e si
+perde al riavvio. Senza conferme utilizzabili viene mostrata la lista completa,
+anche se il filtro è attivo, per evitare schede vuote per errori delle fonti.
+
+Il filtro riguarda le schede fornite da questo addon, anche aprendo lo stesso
+anime da un altro catalogo se Nuvio sceglie questi metadati. Non richiede modifiche
+a Nuvio; se il client sceglie un altro provider meta, viene usata la sua lista.
+La presenza sulle fonti monitorate non garantisce uno stream italiano negli
+addon di riproduzione installati.

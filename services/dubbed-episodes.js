@@ -5,6 +5,7 @@ const episodeNumber = require("./episode-numbers");
 const debug = require("../debug");
 
 const TTL = 10 * 60 * 1000;
+const STALE_TTL = 24 * 60 * 60 * 1000;
 const RETRY = 60 * 1000;
 const availability = new Map();
 const pending = new Map();
@@ -75,15 +76,25 @@ function getNumbers(kitsuId, info, total) {
       if (availability.size >= 2000) availability.delete(availability.keys().next().value);
       // Unconfirmed/failed lookups retry quickly; they are never a negative
       // claim that an episode has no Italian dub.
-      availability.set(key, { numbers, expiresAt: Date.now() + (numbers.size ? TTL : RETRY) });
-      return numbers;
+      const now = Date.now();
+      const previous = cached && now - cached.confirmedAt < STALE_TTL ? cached : null;
+      const usable = numbers.size ? numbers : previous?.numbers || numbers;
+      availability.set(key, {
+        numbers: usable,
+        confirmedAt: numbers.size ? now : previous?.confirmedAt,
+        expiresAt: Math.min(now + (numbers.size ? TTL : RETRY),
+          usable.size ? (numbers.size ? now : previous.confirmedAt) + STALE_TTL : Infinity),
+      });
+      return usable;
     }).finally(() => pending.delete(key));
     pending.set(key, request);
   }
   return pending.get(key);
 }
 
-async function annotateDubbedEpisodes(meta, kitsuId, info) {
+// Filter a request-local list after all metadata providers have enriched it.
+// No evidence (or an unmappable numbering scheme) must not empty the series.
+async function filterDubbedEpisodes(meta, kitsuId, info) {
   if (!Array.isArray(meta.videos) || !meta.videos.length || !/^\d+$/.test(String(kitsuId))) return meta;
   let confirmed;
   try {
@@ -94,15 +105,11 @@ async function annotateDubbedEpisodes(meta, kitsuId, info) {
     return meta;
   }
   if (!confirmed.size) return meta;
-  return {
-    ...meta,
-    videos: meta.videos.map((video) => {
-      const number = episodeNumber(video.episode);
-      if (video.season !== 1 || video.id !== `kitsu:${kitsuId}:${number}` || !confirmed.has(number)) return video;
-      const title = video.title || `Episodio ${number}`;
-      return { ...video, title: /^\[ITA\](?:\s|$)/.test(title) ? title : `[ITA] ${title}` };
-    }),
-  };
+  const videos = meta.videos.filter((video) => {
+    const number = episodeNumber(video.episode);
+    return video.season === 1 && video.id === `kitsu:${kitsuId}:${number}` && confirmed.has(number);
+  });
+  return videos.length ? { ...meta, videos } : meta;
 }
 
-module.exports = { annotateDubbedEpisodes };
+module.exports = { filterDubbedEpisodes };
