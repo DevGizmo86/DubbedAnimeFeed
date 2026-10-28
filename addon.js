@@ -7,6 +7,7 @@ const {
 } = require("./services/animeunity");
 const { getKitsuMeta } = require("./services/kitsu");
 const debug = require("./debug");
+const { landscapePreview } = require("./services/artwork");
 
 // Latest dubbed releases, split into series and movies.
 const LATEST_SERIES_ID = "au-dubbed-latest-series";
@@ -22,7 +23,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.5.10",
+  version: "1.5.11",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -155,11 +156,9 @@ builder.defineCatalogHandler(async ({ type, id, extra, config }) => {
   // Clone previews so one installation's choice cannot alter shared caches.
   const landscape = config && config.posterOrientation === "landscape";
   return {
-    metas: metas.map((meta) => ({
-      ...meta,
-      poster: landscape ? meta.background || meta.poster : meta.poster,
-      posterShape: landscape ? "landscape" : "poster",
-    })),
+    metas: metas.map((meta) => landscape
+      ? landscapePreview(meta)
+      : { ...meta, posterShape: "poster" }),
   };
 });
 
