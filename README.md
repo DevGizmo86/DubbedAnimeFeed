@@ -180,8 +180,12 @@ per le traduzioni italiane; la chiave impostata in Nuvio è usata dall'app.
 
 Nella pagina di configurazione scegli `portrait` (verticale, predefinito) o
 `landscape` (orizzontale). La scelta si applica a tutti i cataloghi, ricerca
-compresa. Landscape usa l'immagine di copertina orizzontale del titolo, se
-disponibile, e altrimenti la locandina. Installa il link generato dalla nuova
+compresa. Landscape usa l'immagine di copertina orizzontale del titolo; quando
+manca, cerca la copertina Kitsu tramite ID esatto. Se anche Kitsu non ha una
+copertina, la locandina viene mostrata intera in un'immagine 16:9 con margini
+laterali, senza ritagliarla. Il recupero delle immagini avviene al caricamento
+delle schede, senza rallentare la risposta del catalogo, e non richiede chiavi
+API aggiuntive. Installa il link generato dalla nuova
 configurazione per applicare la scelta.
 
 ### Filtro episodi doppiati (1.5.10)

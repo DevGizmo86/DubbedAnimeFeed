@@ -21,6 +21,7 @@ const express = require("express");
 const { getRouter } = require("stremio-addon-sdk");
 const landingTemplate = require("stremio-addon-sdk/src/landingTemplate");
 const addonInterface = require("./addon");
+const { getLandscapeArtwork, absoluteArtwork } = require("./services/artwork");
 const {
   getDubbedCatalog,
   getTopDubbedCatalog,
@@ -105,7 +106,28 @@ const landingHTML = landingTemplate(addonInterface.manifest)
   );
 
 const app = express();
-app.use(getRouter(addonInterface));
+app.use((req, res, next) => {
+  // Beamup terminates TLS at its reverse proxy.
+  const protocol = req.get("x-forwarded-proto")?.split(",")[0].trim() === "https" ? "https" : req.protocol;
+  const origin = `${protocol}://${req.get("host")}`;
+  return getRouter({
+    ...addonInterface,
+    get: async (...args) => absoluteArtwork(await addonInterface.get(...args), origin),
+  })(req, res, next);
+});
+app.get("/artwork/landscape/:id.jpg", async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) return res.sendStatus(404);
+  try {
+    const artwork = await getLandscapeArtwork(req.params.id);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "public, max-age=21600");
+    if (artwork.redirect) return res.redirect(302, artwork.redirect);
+    res.type("jpeg").send(artwork.body);
+  } catch (error) {
+    console.error(`Landscape artwork ${req.params.id} failed: ${error.message}`);
+    res.sendStatus(502);
+  }
+});
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 
 const sendLanding = (_, res) => {
