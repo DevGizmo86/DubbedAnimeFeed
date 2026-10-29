@@ -7,7 +7,7 @@ const {
 } = require("./services/animeunity");
 const { getKitsuMeta } = require("./services/kitsu");
 const debug = require("./debug");
-const { landscapePreview } = require("./services/artwork");
+const { landscapePage } = require("./services/artwork");
 
 // Latest dubbed releases, split into series and movies.
 const LATEST_SERIES_ID = "au-dubbed-latest-series";
@@ -23,7 +23,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.5.13",
+  version: "1.5.14",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -54,7 +54,7 @@ const manifest = {
       key: "tmdbKey",
       type: "text",
       title:
-        "Chiave API TMDB (opzionale) — per titoli, trame ed episodi in italiano",
+        "Chiave API TMDB (opzionale) — backdrop landscape, titoli, trame ed episodi ITA",
     },
   ],
   catalogs: [
@@ -156,9 +156,9 @@ builder.defineCatalogHandler(async ({ type, id, extra, config }) => {
   // Clone previews so one installation's choice cannot alter shared caches.
   const landscape = config && config.posterOrientation === "landscape";
   return {
-    metas: metas.map((meta) => landscape
-      ? landscapePreview(meta)
-      : { ...meta, posterShape: "poster" }),
+    metas: landscape
+      ? await landscapePage(metas, tmdbKey)
+      : metas.map((meta) => ({ ...meta, posterShape: "poster" })),
   };
 });
 

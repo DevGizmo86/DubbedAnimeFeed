@@ -64,6 +64,11 @@ const PANEL_CSS = `
 const landingHTML = landingTemplate(addonInterface.manifest)
   .replace("</style>", `${PANEL_CSS}</style>`)
   .replace('id="onlyDubbedEpisodes"', 'id="onlyDubbedEpisodes" aria-describedby="dubbedEpisodesHelp"')
+  .replace('id="tmdbKey"', 'id="tmdbKey" aria-describedby="tmdbKeyHelp"')
+  .replace(
+    /(<input\b[^>]*id="tmdbKey"[^>]*\/>)/,
+    '$1<p id="tmdbKeyHelp" class="config-help">Per i veri sfondi landscape puoi usare la stessa chiave API TMDB configurata in Nuvio, copiandola qui: Nuvio non la trasmette automaticamente all’addon. Salva e reinstalla il link generato. Le immagini vengono cercate direttamente su TMDB, senza EasyCatalogs; se manca uno sfondo si cerca una copertina orizzontale Kitsu o un’immagine di episodio. Non vengono adattate locandine verticali con bande o sfondi sfocati.</p>'
+  )
   .replace(
     /(<label for="onlyDubbedEpisodes">[\s\S]*?<\/label>)/,
     '$1<p id="dubbedEpisodesHelp" class="config-help">La disponibilità in italiano si basa sulla presenza dell’episodio doppiato su AnimeWorld o AnimeUnity: basta la conferma di una delle due fonti. Se non è possibile verificare, manteniamo l’ultima verifica valida (fino a 24 ore); senza conferme mostriamo tutti gli episodi. La presenza sulle fonti non garantisce uno stream italiano negli addon installati.</p>'

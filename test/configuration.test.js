@@ -63,4 +63,10 @@ test("configuration renders an unchecked accessible option with the source expla
   assert.match(help.text(), /24 ore/);
   assert.match(help.text(), /tutti gli episodi/);
   assert.equal($("#copyManifestBtn").length, 1);
+  const key = $("#tmdbKey");
+  const keyHelp = $(`#${key.attr("aria-describedby")}`);
+  assert.equal(key.length, 1);
+  assert.match(keyHelp.text(), /stessa chiave API TMDB configurata in Nuvio/);
+  assert.match(keyHelp.text(), /non la trasmette automaticamente/);
+  assert.match(keyHelp.text(), /senza EasyCatalogs/);
 });
