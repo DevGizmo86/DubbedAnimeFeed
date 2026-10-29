@@ -65,10 +65,11 @@ const PANEL_CSS = `
 const landingHTML = landingTemplate(addonInterface.manifest)
   .replace("</style>", `${PANEL_CSS}</style>`)
   .replace('id="onlyDubbedEpisodes"', 'id="onlyDubbedEpisodes" aria-describedby="dubbedEpisodesHelp"')
+  .replace(/(<input\b[^>]*id="topPosterKey"[^>]*\/>)/, input => input.replace('type="text"', 'type="password" autocomplete="off"').replace('id="topPosterKey"', 'id="topPosterKey" aria-describedby="topPosterHelp"') + '<p id="topPosterHelp" class="config-help">Seleziona TOP Posters come fonte e inserisci la tua chiave. Attiva Banners nella dashboard TOP Posters: vengono usate immagini 16:9 tramite ID Kitsu, con stile, lingua e badge impostati nella dashboard. Se non disponibili, il servizio riceve un’immagine orizzontale alternativa da TMDB (se configurato) o Kitsu. La chiave è inclusa negli URL personali delle immagini previsti dal servizio: non condividere il manifest. Questa scelta non modifica le immagini portrait né i testi e gli episodi TMDB.</p>')
   .replace('id="tmdbKey"', 'id="tmdbKey" aria-describedby="tmdbKeyHelp"')
   .replace(
     /(<input\b[^>]*id="tmdbKey"[^>]*\/>)/,
-    '$1<p id="tmdbKeyHelp" class="config-help">Per i veri sfondi landscape puoi usare la stessa chiave API TMDB configurata in Nuvio, copiandola qui: Nuvio non la trasmette automaticamente all’addon. Salva e reinstalla il link generato. Le immagini vengono cercate direttamente su TMDB, senza EasyCatalogs; se manca uno sfondo si cerca una copertina orizzontale Kitsu o un’immagine di episodio. Non vengono adattate locandine verticali con bande o sfondi sfocati.</p>'
+    '$1<p id="tmdbKeyHelp" class="config-help">Per i veri sfondi landscape puoi usare la stessa chiave API TMDB configurata in Nuvio, copiandola qui: Nuvio non la trasmette automaticamente all’addon. Salva e reinstalla il link generato. Quando selezioni TMDB, le immagini vengono cercate direttamente su TMDB, senza EasyCatalogs; se manca uno sfondo si cerca una copertina orizzontale Kitsu o un’immagine di episodio. Non vengono adattate locandine verticali con bande o sfondi sfocati.</p>'
   )
   .replace(
     /(<label for="onlyDubbedEpisodes">[\s\S]*?<\/label>)/,

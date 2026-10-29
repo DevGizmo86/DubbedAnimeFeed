@@ -267,3 +267,22 @@ pagina personaggi dello stesso ID MAL. Il selettore generico delle lingue non
 vale come conferma. La scansione riprende a lotti e rispetta l'ordine MAL; i
 crediti non vengono usati per dedurre episodi disponibili o stream italiani.
 AnimeWorld riceve una pausa di 15 minuti dopo HTTP 403 e un minuto dopo 429.
+
+### TOP Posters landscape (1.5.19)
+
+In configurazione scegli **Fonte immagini landscape → TOP Posters**, inserisci
+la **Chiave API TOP Posters**, imposta l'orientamento **landscape** e reinstalla
+il manifest generato. Attiva **Banners** nella dashboard TOP Posters; lingua,
+stile e badge seguono quella dashboard. Si usa il banner 16:9 con ID Kitsu
+diretto, senza convertire gli ID dei cataloghi o degli episodi.
+
+La scelta predefinita resta TMDB per le installazioni esistenti. La chiave TMDB
+continua a localizzare testi ed episodi anche scegliendo TOP Posters. Il banner
+riceve come `fallback_url` solo una vera immagine orizzontale: TMDB se
+configurato, altrimenti copertina o fotogramma Kitsu. Non si aggiungono bande
+o sfondi sfocati e non si usano poster verticali come alternativa.
+
+TOP Posters autentica le richieste con la chiave negli URL delle immagini;
+il manifest e le risposte dei cataloghi configurati restano personali. La
+chiave non viene inserita nel repository o nei log dell'addon.
+Riferimento: https://top-posters.com/api e https://top-posters.com/openapi.json.

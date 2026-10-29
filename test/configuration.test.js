@@ -69,6 +69,11 @@ test("configuration renders an unchecked accessible option with the source expla
   assert.match(keyHelp.text(), /stessa chiave API TMDB configurata in Nuvio/);
   assert.match(keyHelp.text(), /non la trasmette automaticamente/);
   assert.match(keyHelp.text(), /senza EasyCatalogs/);
+  assert.deepEqual($('#backdropProvider option').toArray().map(e=>$(e).text()),['TMDB','TOP Posters']);
+  assert.equal($('#topPosterKey').attr('type'),'password');
+  assert.match($('#topPosterHelp').text(),/Attiva Banners/);
+  assert.match($('#topPosterHelp').text(),/ID Kitsu/);
+  assert.match($('#topPosterHelp').text(),/non condividere il manifest/);
 });
 
 test('health exposes aggregate source status without caching or fetching providers',()=>{

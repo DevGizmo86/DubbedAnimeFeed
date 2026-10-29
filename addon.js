@@ -23,7 +23,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.5.18",
+  version: "1.5.19",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -44,6 +44,18 @@ const manifest = {
       title: "Orientamento immagini — tutti i cataloghi",
       options: ["portrait", "landscape"],
       default: "portrait",
+    },
+    {
+      key: "backdropProvider",
+      type: "select",
+      title: "Fonte immagini landscape",
+      options: ["TMDB", "TOP Posters"],
+      default: "TMDB",
+    },
+    {
+      key: "topPosterKey",
+      type: "text",
+      title: "Chiave API TOP Posters (solo per immagini landscape)",
     },
     {
       key: "onlyDubbedEpisodes",
@@ -161,7 +173,10 @@ builder.defineCatalogHandler(async ({ type, id, extra, config }) => {
     staleRevalidate: 0,
     staleError: 0,
     metas: landscape
-      ? await landscapePage(metas, tmdbKey)
+      ? await landscapePage(metas, tmdbKey, {
+          provider: config?.backdropProvider === "TOP Posters" ? "topposters" : "tmdb",
+          topPosterKey: config?.topPosterKey,
+        })
       : metas.map((meta) => ({ ...meta, posterShape: "poster" })),
   };
 });
