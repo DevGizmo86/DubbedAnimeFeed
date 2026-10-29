@@ -258,3 +258,12 @@ che un risultato parziale o vuoto rimanga memorizzato per ore dal proxy.
 `/health` espone solo versione, conteggi delle classifiche e stato aggregato
 delle verifiche ITA (timeout, errori HTTP, corrispondenze), senza chiavi TMDB
 o URL di configurazione. Non avvia richieste aggiuntive alle fonti.
+
+### Conferma ITA da MyAnimeList (1.5.18)
+
+Quando gli archivi sono indisponibili o parziali, i Top possono confermare
+l'esistenza del doppiaggio tramite i crediti dei doppiatori **Italian** nella
+pagina personaggi dello stesso ID MAL. Il selettore generico delle lingue non
+vale come conferma. La scansione riprende a lotti e rispetta l'ordine MAL; i
+crediti non vengono usati per dedurre episodi disponibili o stream italiani.
+AnimeWorld riceve una pausa di 15 minuti dopo HTTP 403 e un minuto dopo 429.
