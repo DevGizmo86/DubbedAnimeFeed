@@ -702,7 +702,10 @@ async function getTopAiringDubbedRecords() {
     return airingRecordsCache.records;
   }
 
-  const [index, top] = await Promise.all([buildDubbedIndex(), getTopAnime(MAX_AIRING_MAL_PAGES, "airing")]);
+  const [index, top] = await Promise.all([
+    buildDubbedIndex().catch(() => new Map()),
+    getTopAnime(MAX_AIRING_MAL_PAGES, "airing"),
+  ]);
 
   const matched = [];
   const seen = new Set();
@@ -713,8 +716,20 @@ async function getTopAiringDubbedRecords() {
     matched.push(record);
   }
 
+  // The alternate archive may still be scanning older high-rated shows.
+  // Confirm MAL's airing candidates directly rather than hiding this row until
+  // archive pagination eventually reaches recent dubs such as One Piece.
+  if (!matched.length && typeof animeworld.getDubbedMatches === "function") {
+    const verified = await animeworld.getDubbedMatches(top);
+    const byMal = new Map(verified.filter(r => r._dubbed).map(r => [String(r.mal_id), r]));
+    for (const entry of top) {
+      const record = byMal.get(String(entry.mal_id));
+      if (record && !seen.has(record.id)) { seen.add(record.id); matched.push(record); }
+    }
+  }
+
   debug(`getTopAiringDubbedRecords: ${matched.length} MAL-top airing anime are dubbed`);
-  airingRecordsCache = { records: matched, builtAt: Date.now(), ttl: topTtl() };
+  airingRecordsCache = { records: matched, builtAt: Date.now(), ttl: matched.length ? topTtl() : 60000 };
   return matched;
 }
 
@@ -727,7 +742,7 @@ async function buildTopAiringDubbedCatalog() {
   const records = await getTopAiringDubbedRecords();
   const metas = await recordsToMetas(records);
   if (records.length && !metas.length) throw new Error("Kitsu mappings unavailable for airing catalog");
-  airingMetaCache = { metas, builtAt: Date.now(), ttl: topTtl() };
+  airingMetaCache = { metas, builtAt: Date.now(), ttl: Math.min(topTtl(), airingRecordsCache?.ttl || topTtl()) };
   return metas;
 }
 

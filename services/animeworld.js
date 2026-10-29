@@ -5,7 +5,7 @@ const episodeNumber = require("./episode-numbers");
 
 // Only metadata is requested: homepage and title pages, never video servers.
 const BASE = "https://www.animeworld.ac";
-const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.14)";
+const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.15)";
 const DETAIL_TTL = 12 * 60 * 60 * 1000;
 const details = new Map();
 const pending = new Map();
@@ -215,16 +215,61 @@ function matchesExternalId(detail, expected) {
   return keys.length > 0 && keys.every((key) => String(expected[key]) === String(detail[key]));
 }
 
-function parseSearch(text) {
+function parseSearch(text, title = null) {
   const $ = cheerio.load(text);
-  const urls = new Set();
+  const urls = new Map();
+  const norm = value => String(value || "").replace(/\s*\(ITA\)\s*$/i, "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
   $(".film-list .item").each((_, element) => {
     const card = $(element);
     if (!card.find(".dub").length) return;
     const match = (card.find("a.name").attr("href") || "").match(/^\/play\/([^/?#]+)$/);
-    if (match) urls.add(`${BASE}/play/${match[1]}`);
+    if (match) {
+      const exact = title && [card.find("a.name").text(), card.find("a.name").attr("data-jtitle")].some(value => value && norm(value) === norm(title));
+      urls.set(`${BASE}/play/${match[1]}`, exact ? 1 : 0);
+    }
   });
-  return [...urls].slice(0, 4);
+  return [...urls].sort((a,b) => b[1]-a[1]).slice(0,4).map(([url])=>url);
+}
+
+const rankedMatches = new Map();
+const rankedPending = new Map();
+async function findRankedDub(entry, timeout) {
+  const id = String(entry.mal_id || "");
+  if (!/^\d+$/.test(id) || !entry.title) return null;
+  const hit = rankedMatches.get(id);
+  if (hit && Date.now() - hit.at < (hit.record ? DETAIL_TTL : 60000)) return hit.record;
+  if (!rankedPending.has(id)) {
+    rankedPending.set(id, (async () => {
+      const urls = parseSearch(await html(`${BASE}/search?keyword=${encodeURIComponent(entry.title)}`, timeout), entry.title);
+      const results = await Promise.allSettled(urls.map(async url => {
+        const detail = await getDetail(url, timeout);
+        if (!detail._dubbed || String(detail.mal_id) !== id) return null;
+        const slug = new URL(url).pathname.slice("/play/".length);
+        return { ...detail, id: `aw:${slug}`, title: entry.title, _source: "AnimeWorld" };
+      }));
+      const record = results.find(r => r.status === "fulfilled" && r.value)?.value || null;
+      if (record || results.every(r => r.status === "fulfilled")) {
+        if (rankedMatches.size >= 1000) rankedMatches.delete(rankedMatches.keys().next().value);
+        rankedMatches.set(id, { record, at: Date.now() });
+      }
+      return record;
+    })().catch(() => null).finally(() => rankedPending.delete(id)));
+  }
+  return rankedPending.get(id);
+}
+
+async function getDubbedMatches(entries) {
+  const candidates = entries.slice(0, 40);
+  const output = new Array(candidates.length);
+  const deadline = Date.now() + 20000;
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(6, candidates.length) }, async () => {
+    while (next < candidates.length && Date.now() < deadline) {
+      const i = next++;
+      output[i] = await findRankedDub(candidates[i], Math.min(5000, Math.max(1, deadline - Date.now())));
+    }
+  }));
+  return output.filter(Boolean);
 }
 
 async function getDubbedEpisodes(record, titles = []) {
@@ -278,4 +323,4 @@ async function getDubbedRecords() {
   return records;
 }
 
-module.exports = { getDubbedRecords, getDubbedArchive, getDubbedEpisodes, parseFeed, parseDetail, parseSearch, parseArchive, episodeNumber };
+module.exports = { getDubbedRecords, getDubbedArchive, getDubbedMatches, getDubbedEpisodes, parseFeed, parseDetail, parseSearch, parseArchive, episodeNumber };
