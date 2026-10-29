@@ -212,6 +212,9 @@ all'ID MAL esatto per l'incrocio con la classifica.
 La scansione alternativa lavora a lotti limitati e riprende dalle pagine e
 schede non completate. Finché è parziale, l'indice e i cataloghi derivati
 scadono dopo un minuto, così nuovi risultati entrano senza attendere sei ore.
+Per “in onda”, se l'indice non ha ancora corrispondenze, vengono cercati anche
+i primi titoli della classifica MAL direttamente su AnimeWorld. Ogni risultato
+deve confermare lo stesso ID MAL e l'audio italiano; l'ordine resta quello MAL.
 Se tutte le fonti sono indisponibili, si conserva l'ultimo indice valido per
 un massimo di 24 ore; nessun risultato vuoto dovuto a un errore viene trattato
 come una verifica di doppiaggio.

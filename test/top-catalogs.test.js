@@ -157,3 +157,15 @@ test('partial AnimeWorld archives refresh all derived Top caches after a minute 
   now+=60001;
   assert.deepEqual((await au.getTopDubbedCatalog('series',0)).map(x=>x.id),['kitsu:2','kitsu:1']);assert.equal(scans,2);
 });
+
+test('airing candidates are verified directly when the alternate archive has no matches, preserving MAL order',async()=>{
+ let lookedUp;
+ const au=loadService('animeunity',{
+  'node-fetch':async url=>{if(url.includes('animeunity.so'))throw Error('DNS');return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
+  './animeworld':{
+   getDubbedArchive:async()=>({complete:false,records:[{id:'aw:old',mal_id:99,_dubbed:true,type:'TV'}]}),getDubbedRecords:async()=>[],
+   getDubbedMatches:async entries=>{lookedUp=entries;return[{id:'aw:two',mal_id:2,_dubbed:true,type:'TV',title:'Two'},{id:'aw:one',mal_id:1,_dubbed:true,type:'TV',title:'One'}]},
+  },'./mal':{getTopAnime:async()=>[{mal_id:1,title:'One'},{mal_id:2,title:'Two'}]},'./tmdb':{},
+ });
+ assert.deepEqual((await au.getTopAiringDubbedCatalog(0)).map(x=>x.id),['kitsu:1','kitsu:2']);assert.equal(lookedUp.length,2);
+});

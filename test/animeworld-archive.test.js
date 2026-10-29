@@ -38,3 +38,19 @@ test('failed details and interrupted pages retain verified records and resume in
  const first=await aw.getDubbedArchive();assert.equal(first.records.length,1);assert.equal(first.complete,false);
  offline=false;const second=await aw.getDubbedArchive();assert.equal(second.records.length,2);assert.equal(second.complete,true);
 });
+
+test('direct ranked searches require a DUB result, Italian audio and the exact MAL ID',async()=>{
+ const aw=service(async url=>{
+  if(url.includes('/search?'))return html(page(card('wrong-id')+card('correct')+card('sub',false)));
+  if(url.endsWith('/wrong-id'))return html(detail(99));
+  return html(detail(21));
+ });
+ const result=await aw.getDubbedMatches([{mal_id:21,title:'One Piece'}]);
+ assert.equal(result.length,1);assert.equal(result[0].mal_id,'21');assert.equal(result[0].id,'aw:correct');assert.equal(result[0]._dubbed,true);
+});
+
+test('ranked searches prioritize the exact title ahead of similarly named specials',()=>{
+ const aw=service(()=>{throw Error('unexpected network')});
+ const text=page(Array.from({length:5},(_,i)=>card(`special-${i}`)).join('')+card('original').replace('Example (ITA)','One Piece (ITA)'));
+ assert.equal(aw.parseSearch(text,'One Piece')[0],'https://www.animeworld.ac/play/original');
+});
