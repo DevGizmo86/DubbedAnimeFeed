@@ -54,3 +54,37 @@ test('ranked searches prioritize the exact title ahead of similarly named specia
  const text=page(Array.from({length:5},(_,i)=>card(`special-${i}`)).join('')+card('original').replace('Example (ITA)','One Piece (ITA)'));
  assert.equal(aw.parseSearch(text,'One Piece')[0],'https://www.animeworld.ac/play/original');
 });
+
+test('ranked scans resume beyond the first 40 and retain previous positives in MAL order',async()=>{
+ const searched=[];
+ const aw=service(async(url,options)=>{
+  assert(options.timeout>5000);
+  if(url.includes('/search?')){
+   const id=Number(new URL(url).searchParams.get('keyword').split(' ')[1]);searched.push(id);
+   return html(page(id===3||id===45?card(`title-${id}`):''));
+  }
+  return html(detail(Number(url.match(/title-(\d+)/)[1])));
+ });
+ const entries=Array.from({length:50},(_,i)=>({mal_id:i+1,title:`Title ${i+1}`}));
+ assert.deepEqual((await aw.getDubbedMatches(entries)).map(r=>r.mal_id),['3']);
+ assert.deepEqual((await aw.getDubbedMatches(entries)).map(r=>r.mal_id),['3','45']);
+ assert(searched.includes(45));assert.equal(searched.filter(id=>id===3).length,1);
+});
+
+test('a timed out batch resumes at unstarted candidates instead of skipping them',async t=>{
+ let now=100000;t.mock.method(Date,'now',()=>now);
+ const searched=[];
+ const aw=service(async url=>{
+  if(url.includes('/search?')){
+   const id=Number(new URL(url).searchParams.get('keyword'));searched.push(id);
+   if(id<=6){now+=30000;throw Error('provider timeout');}
+   return html(page(card(`title-${id}`)));
+  }
+  return html(detail(Number(url.match(/title-(\d+)/)[1])));
+ });
+ const entries=Array.from({length:10},(_,i)=>({mal_id:i+1,title:String(i+1)}));
+ await aw.getDubbedMatches(entries);
+ const firstCount=searched.length;
+ await aw.getDubbedMatches(entries);
+ assert.equal(searched[firstCount],firstCount+1);
+});

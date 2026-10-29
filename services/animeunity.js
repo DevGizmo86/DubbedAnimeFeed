@@ -719,9 +719,11 @@ async function getTopAiringDubbedRecords() {
   // The alternate archive may still be scanning older high-rated shows.
   // Confirm MAL's airing candidates directly rather than hiding this row until
   // archive pagination eventually reaches recent dubs such as One Piece.
-  if (!matched.length && typeof animeworld.getDubbedMatches === "function") {
+  if (typeof animeworld.getDubbedMatches === "function" && (!matched.length || dubbedIndexCache?.ttl < DUBBED_INDEX_TTL_MS)) {
     const verified = await animeworld.getDubbedMatches(top);
-    const byMal = new Map(verified.filter(r => r._dubbed).map(r => [String(r.mal_id), r]));
+    const byMal = new Map([...matched, ...verified.filter(r => r._dubbed)].map(r => [String(r.mal_id), r]));
+    matched.length = 0;
+    seen.clear();
     for (const entry of top) {
       const record = byMal.get(String(entry.mal_id));
       if (record && !seen.has(record.id)) { seen.add(record.id); matched.push(record); }

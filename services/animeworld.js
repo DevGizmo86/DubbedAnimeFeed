@@ -5,7 +5,7 @@ const episodeNumber = require("./episode-numbers");
 
 // Only metadata is requested: homepage and title pages, never video servers.
 const BASE = "https://www.animeworld.ac";
-const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.15)";
+const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.16)";
 const DETAIL_TTL = 12 * 60 * 60 * 1000;
 const details = new Map();
 const pending = new Map();
@@ -233,16 +233,21 @@ function parseSearch(text, title = null) {
 
 const rankedMatches = new Map();
 const rankedPending = new Map();
-async function findRankedDub(entry, timeout) {
+async function findRankedDub(entry, deadline) {
+  const remaining = () => {
+    const ms = deadline - Date.now();
+    if (ms <= 0) throw new Error("AnimeWorld ranked lookup timed out");
+    return Math.min(12000, ms);
+  };
   const id = String(entry.mal_id || "");
   if (!/^\d+$/.test(id) || !entry.title) return null;
   const hit = rankedMatches.get(id);
   if (hit && Date.now() - hit.at < (hit.record ? DETAIL_TTL : 60000)) return hit.record;
   if (!rankedPending.has(id)) {
     rankedPending.set(id, (async () => {
-      const urls = parseSearch(await html(`${BASE}/search?keyword=${encodeURIComponent(entry.title)}`, timeout), entry.title);
+      const urls = parseSearch(await html(`${BASE}/search?keyword=${encodeURIComponent(entry.title)}`, remaining()), entry.title);
       const results = await Promise.allSettled(urls.map(async url => {
-        const detail = await getDetail(url, timeout);
+        const detail = await getDetail(url, remaining());
         if (!detail._dubbed || String(detail.mal_id) !== id) return null;
         const slug = new URL(url).pathname.slice("/play/".length);
         return { ...detail, id: `aw:${slug}`, title: entry.title, _source: "AnimeWorld" };
@@ -258,18 +263,39 @@ async function findRankedDub(entry, timeout) {
   return rankedPending.get(id);
 }
 
-async function getDubbedMatches(entries) {
-  const candidates = entries.slice(0, 40);
-  const output = new Array(candidates.length);
-  const deadline = Date.now() + 20000;
+// Resume through the entire ranking, including after provider timeouts. A
+// bounded batch must not permanently exclude every title beyond rank 40.
+let rankedScan = { key: "", cursor: 0 };
+let rankedScanPending = null;
+function getDubbedMatches(entries) {
+  if (rankedScanPending) return rankedScanPending.then(() => getCachedRankedMatches(entries));
+  rankedScanPending = scanRankedMatches(entries).finally(() => { rankedScanPending = null; });
+  return rankedScanPending;
+}
+function getCachedRankedMatches(entries) {
+  return entries.map(entry => rankedMatches.get(String(entry.mal_id)))
+    .filter(hit => hit?.record && Date.now() - hit.at < DETAIL_TTL).map(hit => hit.record);
+}
+async function scanRankedMatches(entries) {
+  const key = entries.map(entry => entry.mal_id).join(",");
+  if (key !== rankedScan.key) rankedScan = { key, cursor: 0 };
+  const candidates = [];
+  const positions = [];
+  for (let visited = 0; visited < entries.length && candidates.length < 40; visited++) {
+    const entry = entries[rankedScan.cursor++ % entries.length];
+    const hit = rankedMatches.get(String(entry.mal_id));
+    if (!hit || Date.now() - hit.at >= (hit.record ? DETAIL_TTL : 60000)) { candidates.push(entry); positions.push(rankedScan.cursor - 1); }
+  }
+  const deadline = Date.now() + 30000;
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(6, candidates.length) }, async () => {
     while (next < candidates.length && Date.now() < deadline) {
-      const i = next++;
-      output[i] = await findRankedDub(candidates[i], Math.min(5000, Math.max(1, deadline - Date.now())));
+      await findRankedDub(candidates[next++], deadline);
     }
   }));
-  return output.filter(Boolean);
+  if (next < candidates.length) rankedScan.cursor = positions[next];
+  // Return cached positives from every batch, always in the supplied MAL order.
+  return getCachedRankedMatches(entries);
 }
 
 async function getDubbedEpisodes(record, titles = []) {

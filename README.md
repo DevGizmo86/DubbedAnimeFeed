@@ -25,7 +25,7 @@ L'addon **non riproduce video**: per le **fonti/streaming** serve un addon di st
 4. L'ordine combinato è **approssimativo**: AnimeWorld non espone date di pubblicazione nel feed verificato. Non vengono inventate date né confrontati numeri episodio fra anime diversi. Non viene mantenuto uno storico persistente delle prime rilevazioni.
 5. Le due categorie condividono il recupero delle fonti, con cache di 10 minuti e pre-caricamento all'avvio. Se una fonte fallisce, i risultati freschi dell'altra precedono l'ultima copia disponibile della fonte fallita. Le copie delle fonti e l'ultimo catalogo valido sono conservati **in memoria**, per un massimo di 24 ore; si perdono al riavvio. Se entrambe falliscono, si ritenta dopo un minuto. Errori di fonte o indisponibilità totale dei mapping Kitsu non sono memorizzati come cataloghi vuoti.
 
-Questa integrazione riguarda solo le **ultime uscite**: i cataloghi Top e la ricerca continuano a dipendere dall'archivio AnimeUnity. ID cataloghi, ID Kitsu, configurazione e orientamento immagini restano compatibili.
+Le ultime uscite e i cataloghi Top usano AnimeWorld come alternativa quando AnimeUnity non risponde; la ricerca continua a dipendere dall'archivio AnimeUnity. ID cataloghi, ID Kitsu, configurazione e orientamento immagini restano compatibili.
 
 **Catalogo top (classifica MAL ∩ doppiati):**
 
@@ -212,9 +212,12 @@ all'ID MAL esatto per l'incrocio con la classifica.
 La scansione alternativa lavora a lotti limitati e riprende dalle pagine e
 schede non completate. Finché è parziale, l'indice e i cataloghi derivati
 scadono dopo un minuto, così nuovi risultati entrano senza attendere sei ore.
-Per “in onda”, se l'indice non ha ancora corrispondenze, vengono cercati anche
-i primi titoli della classifica MAL direttamente su AnimeWorld. Ogni risultato
-deve confermare lo stesso ID MAL e l'audio italiano; l'ordine resta quello MAL.
+Per “in onda”, se l'indice è parziale o senza corrispondenze, vengono cercati
+anche i titoli della classifica MAL direttamente su AnimeWorld. Dalla 1.5.16
+la ricerca riprende al lotto successivo anche dopo timeout, senza fermarsi ai
+primi 40 titoli; conserva i risultati verificati e mantiene l'ordine MAL. Ogni
+risultato deve confermare lo stesso ID MAL e l'audio italiano. Le richieste
+dispongono di 12 secondi, entro un limite totale di 30 secondi per scansione.
 Se tutte le fonti sono indisponibili, si conserva l'ultimo indice valido per
 un massimo di 24 ore; nessun risultato vuoto dovuto a un errore viene trattato
 come una verifica di doppiaggio.
