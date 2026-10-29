@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 
 function loadService(name, mocks) {
+  if (name === "animeunity" && !("./mal-dubbed" in mocks)) mocks["./mal-dubbed"] = { getDubbedMatches: async () => [] };
   const path = require.resolve(`../services/${name}`);
   delete require.cache[path];
   const original = Module._load;
@@ -30,7 +31,7 @@ test('Jikan failures and malformed responses do not poison the ranking cache', a
   assert.equal(calls, 3);
 });
 
-test('all three top catalogs recover after an archive failure and share archive requests', async () => {
+test('all three top catalogs recover after an archive failure and share archive requests', async (t) => {
   let archiveCalls = 0;
   let homeCalls = 0;
   const animeunity = loadService('animeunity', {
@@ -55,7 +56,10 @@ test('all three top catalogs recover after an archive failure and share archive 
     './tmdb': {},
     './animeworld': { getDubbedArchive: async () => { throw Error('offline'); }, getDubbedRecords: async () => { throw Error('offline'); } },
   });
-  await assert.rejects(animeunity.getTopDubbedCatalog('series', 0), /503/);
+  await animeunity.getTopDubbedCatalog('series', 0);
+  // Empty transient results refresh on the next minute.
+  const builtAt=Date.now();
+  t.mock.method(Date,"now",()=>builtAt+60001);
   const [series, movies, airing] = await Promise.all([
     animeunity.getTopDubbedCatalog('series', 0),
     animeunity.getTopDubbedCatalog('movie', 0),
@@ -66,6 +70,7 @@ test('all three top catalogs recover after an archive failure and share archive 
   assert.equal(airing.length, 2);
   assert.equal(archiveCalls, 3);
   assert.equal(homeCalls, 2);
+
 });
 
 
@@ -178,4 +183,18 @@ test('a partial archive still verifies missing airing titles and merges in MAL o
   './mal':{getTopAnime:async()=>[{mal_id:1},{mal_id:2}]},'./tmdb':{},
  });
  assert.deepEqual((await au.getTopAiringDubbedCatalog(0)).map(x=>x.id),['kitsu:1','kitsu:2']);
+});
+
+test('all Top catalogs retain MAL order with Italian cast confirmation when both archives fail',async()=>{
+ const record=(id,type)=>({id:`mal:${id}`,mal_id:id,title:`Title ${id}`,type,_dubbed:true});
+ const au=loadService('animeunity',{
+  'node-fetch':async url=>{if(url.includes('animeunity.so'))throw Error('DNS');return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
+  './animeworld':{getDubbedArchive:async()=>{throw Error('403')},getDubbedRecords:async()=>{throw Error('403')},getDubbedMatches:async()=>[]},
+  './mal-dubbed':{getDubbedMatches:async()=>[record(2,'Movie'),record(1,'TV')]},
+  './mal':{getTopAnime:async()=>[{mal_id:1},{mal_id:2}]},'./tmdb':{},
+ });
+ assert.deepEqual((await au.getTopDubbedCatalog('series',0)).map(x=>x.id),['kitsu:1']);
+ assert.deepEqual((await au.getTopDubbedCatalog('movie',0)).map(x=>x.id),['kitsu:2']);
+ assert.deepEqual((await au.getTopAiringDubbedCatalog(0)).map(x=>x.id),['kitsu:1','kitsu:2']);
+ assert.deepEqual(au.getDubbedSources('1'),[]);
 });

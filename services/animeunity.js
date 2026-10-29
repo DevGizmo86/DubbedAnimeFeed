@@ -1,3 +1,4 @@
+const malDubbed = require("./mal-dubbed");
 const fetch = require("node-fetch");
 const debug = require("../debug");
 const { getTopAnime } = require("./mal");
@@ -257,6 +258,7 @@ function getDubbedSources(kitsuId) {
 }
 
 function rememberDubbedSource(kitsuId, record) {
+  if (String(record.id).startsWith("mal:")) return; // Cast credits do not verify episode availability.
   const source = String(record.id).startsWith("aw:") ? "AnimeWorld" : "AnimeUnity";
   const entries = getDubbedSources(kitsuId).filter((entry) => entry.source !== source || entry.record.id !== record.id);
   entries.push({ source, record, at: Date.now() });
@@ -638,7 +640,7 @@ async function loadDubbedIndex() {
 }
 
 // An incomplete alternate archive must not freeze Top rows for six hours.
-const topTtl = () => Math.min(TOP_CATALOG_TTL_MS, dubbedIndexCache?.ttl || TOP_CATALOG_TTL_MS);
+const topTtl = () => Math.min(TOP_CATALOG_TTL_MS, dubbedIndexCache?.ttl || 60000);
 const topFresh = cached => cached && Date.now() - cached.builtAt < (cached.ttl || TOP_CATALOG_TTL_MS);
 
 // Match MyAnimeList's top ranking against the dubbed archive, preserving MAL
@@ -657,7 +659,10 @@ async function loadTopDubbedRecords() {
     return topRecordsCache.records;
   }
 
-  const [index, top] = await Promise.all([buildDubbedIndex(), getTopAnime(MAX_TOP_MAL_PAGES)]);
+  const [index, top] = await Promise.all([buildDubbedIndex().catch(() => new Map()), getTopAnime(MAX_TOP_MAL_PAGES)]);
+  if (!index.size || dubbedIndexCache?.ttl < DUBBED_INDEX_TTL_MS) {
+    for (const record of await malDubbed.getDubbedMatches(top)) if (!index.has(String(record.mal_id))) index.set(String(record.mal_id), record);
+  }
 
   const matched = [];
   const seen = new Set();
@@ -730,6 +735,15 @@ async function getTopAiringDubbedRecords() {
     }
   }
 
+  if (!matched.length || !dubbedIndexCache || dubbedIndexCache.ttl < DUBBED_INDEX_TTL_MS) {
+    const records = await malDubbed.getDubbedMatches(top);
+    const byMal = new Map([...matched, ...records].map(r => [String(r.mal_id), r]));
+    matched.length = 0; seen.clear();
+    for (const entry of top) {
+      const record = byMal.get(String(entry.mal_id));
+      if (record && !seen.has(record.id)) { seen.add(record.id); matched.push(record); }
+    }
+  }
   debug(`getTopAiringDubbedRecords: ${matched.length} MAL-top airing anime are dubbed`);
   airingRecordsCache = { records: matched, builtAt: Date.now(), ttl: matched.length ? topTtl() : 60000 };
   return matched;
@@ -798,6 +812,7 @@ function getCatalogStatus() {
     airingMetas: airingMetaCache?.metas.length ?? null,
     rankings: require("./mal").getRankingStatus(),
     verification: animeworld.getRankedStatus(),
+    italianCast: malDubbed.getStatus(),
   };
 }
 

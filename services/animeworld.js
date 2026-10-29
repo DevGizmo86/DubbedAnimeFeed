@@ -5,7 +5,7 @@ const episodeNumber = require("./episode-numbers");
 
 // Only metadata is requested: homepage and title pages, never video servers.
 const BASE = "https://www.animeworld.ac";
-const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.17)";
+const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.18)";
 const DETAIL_TTL = 12 * 60 * 60 * 1000;
 const details = new Map();
 const pending = new Map();
@@ -101,11 +101,17 @@ function getDubbedArchive() {
   return archivePending;
 }
 
+let blockedUntil = 0, blockedStatus = null;
 async function html(url, timeout = 10000) {
+  if (Date.now() < blockedUntil) throw new Error(`AnimeWorld metadata error: ${blockedStatus}`);
   const response = await fetch(url, {
     headers: { "User-Agent": UA, Accept: "text/html" },
     timeout,
   });
+  if (response.status === 403 || response.status === 429) {
+    blockedStatus = response.status;
+    blockedUntil = Date.now() + (response.status === 403 ? 15 * 60000 : 60000);
+  }
   if (!response.ok) throw new Error(`AnimeWorld metadata error: ${response.status}`);
   return response.text();
 }
