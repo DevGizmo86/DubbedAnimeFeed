@@ -21,7 +21,7 @@ const express = require("express");
 const { getRouter } = require("stremio-addon-sdk");
 const landingTemplate = require("stremio-addon-sdk/src/landingTemplate");
 const addonInterface = require("./addon");
-const { getLandscapeArtwork, absoluteArtwork } = require("./services/artwork");
+const { getLandscapeArtwork, absoluteArtwork, publicOrigin } = require("./services/artwork");
 const {
   getDubbedCatalog,
   getTopDubbedCatalog,
@@ -107,9 +107,7 @@ const landingHTML = landingTemplate(addonInterface.manifest)
 
 const app = express();
 app.use((req, res, next) => {
-  // Beamup terminates TLS at its reverse proxy.
-  const protocol = req.get("x-forwarded-proto")?.split(",")[0].trim() === "https" ? "https" : req.protocol;
-  const origin = `${protocol}://${req.get("host")}`;
+  const origin = publicOrigin(req);
   return getRouter({
     ...addonInterface,
     get: async (...args) => absoluteArtwork(await addonInterface.get(...args), origin),

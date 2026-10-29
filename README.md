@@ -193,6 +193,14 @@ usano la nuova immagine; l'URL è versionato per evitare la cache del vecchio
 ritaglio. Installa il link generato dalla nuova
 configurazione per applicare la scelta.
 
+Gli URL delle immagini usano il dominio pubblico inoltrato dal proxy. Su Beamup,
+se `Host` contiene il solo nome interno dell'app, viene ricostruito il dominio
+HTTPS pubblico `.baby-beamup.club`. Per altri reverse proxy è possibile impostare
+`PUBLIC_URL=https://dominio-pubblico.example` per fissare l'origine delle immagini.
+Tutte le immagini landscape vengono verificate e adattate a 960×540 senza
+ritagli, incluse le copertine Kitsu molto panoramiche. Se lo sfondo EasyCatalogs
+non è scaricabile si prova Kitsu; se manca la copertina si prova la sua locandina.
+
 ### Filtro episodi doppiati (1.5.10)
 
 Nella pagina di configurazione puoi attivare **Mostra solo episodi confermati
