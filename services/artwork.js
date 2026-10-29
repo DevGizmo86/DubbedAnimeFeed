@@ -17,7 +17,7 @@ function landscapePreview(meta) {
   const id = meta.id.match(/^kitsu:(\d+)$/)?.[1];
   if (!id) return { ...meta, posterShape: "poster" };
   const type = meta.type === "movie" ? "movie" : "series";
-  const url = `${PREFIX}${type}/${id}.jpg?v=2`;
+  const url = `${PREFIX}${type}/${id}.jpg?v=3`;
   // Landscape clients may read background instead of poster. Keep them aligned
   // and version the URL to avoid reusing the previous cropped image cache.
   return { ...meta, poster: url, background: url, posterShape: "landscape" };
@@ -26,6 +26,20 @@ function landscapePreview(meta) {
 function imageUrl(value) {
   try { return typeof value === "string" && new URL(value).protocol === "https:" ? value : null; }
   catch (_) { return null; }
+}
+
+async function renderArtwork(url) {
+  const response = await fetch(url, { timeout: 5000, size: 10 * 1024 * 1024 });
+  if (!response.ok) throw new Error(`Artwork HTTP ${response.status}`);
+  const input = await response.buffer();
+  // Kitsu covers can be very wide banners. Always contain the full image in
+  // 16:9, so the client's cover fitting cannot crop either banners or posters.
+  const body = await sharp(input, { limitInputPixels: 40000000 })
+    .rotate()
+    .resize(960, 540, { fit: "contain", background: "#171717" })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+  return { body };
 }
 
 async function buildArtwork(id, type) {
@@ -38,7 +52,7 @@ async function buildArtwork(id, type) {
     const meta = json.meta;
     if (meta?.id === `kitsu:${id}` && meta.type === type && meta.background !== meta.poster) {
       const background = imageUrl(meta.background);
-      if (background) return { redirect: background };
+      if (background) return await renderArtwork(background);
     }
   } catch (_) { /* Fall back to Kitsu's own artwork for this exact ID. */ }
   const responseMeta = await fetch(`https://kitsu.io/api/edge/anime/${id}`, { timeout: 5000 });
@@ -48,20 +62,14 @@ async function buildArtwork(id, type) {
   const a = json.data.attributes || {};
   const cover = a.coverImage;
   const url = cover && imageUrl(cover.original || cover.large || cover.small);
-  if (url) return { redirect: url };
+  if (url) {
+    try { return await renderArtwork(url); }
+    catch (_) { /* Missing/corrupt cover: try this same anime's poster. */ }
+  }
   const image = a.posterImage;
   const poster = image && imageUrl(image.original || image.large || image.medium);
   if (!poster) throw new Error("No artwork available");
-  const response = await fetch(poster, { timeout: 5000, size: 10 * 1024 * 1024 });
-  if (!response.ok) throw new Error(`Poster HTTP ${response.status}`);
-  const input = await response.buffer();
-  // Contain preserves the whole poster, even if Nuvio forces every tile to 16:9.
-  const body = await sharp(input, { limitInputPixels: 40000000 })
-    .rotate()
-    .resize(640, 360, { fit: "contain", background: "#171717" })
-    .jpeg({ quality: 85 })
-    .toBuffer();
-  return { body };
+  return renderArtwork(poster);
 }
 
 async function getLandscapeArtwork(id, type = "series") {
@@ -91,4 +99,18 @@ function absoluteArtwork(response, origin) {
   }) };
 }
 
-module.exports = { landscapePreview, getLandscapeArtwork, absoluteArtwork };
+function publicOrigin(req) {
+  if (process.env.PUBLIC_URL) return new URL(process.env.PUBLIC_URL).origin;
+  const forwardedHost = req.get("x-forwarded-host")?.split(",")[0].trim();
+  let host = forwardedHost || req.get("host");
+  let protocol = req.get("x-forwarded-proto")?.split(",")[0].trim() || req.protocol;
+  // Beamup rewrites Host to its internal app name. That name resolves inside
+  // the platform only; return the public hostname to Android/TV clients.
+  if (/^[a-f0-9]{12}-[a-z0-9-]+$/i.test(host)) {
+    host += ".baby-beamup.club";
+    protocol = "https";
+  }
+  return `${protocol === "https" ? "https" : "http"}://${host}`;
+}
+
+module.exports = { landscapePreview, getLandscapeArtwork, absoluteArtwork, publicOrigin };
