@@ -2,6 +2,7 @@ const fetch = require("node-fetch");
 const sharp = require("sharp");
 const crypto = require("node:crypto");
 const tmdb = require("./tmdb-artwork");
+const { bannerUrl } = require("./top-posters");
 
 const PREFIX = "/artwork/landscape/";
 const cache = new Map();
@@ -47,14 +48,26 @@ async function resolveLandscape(id, tmdbKey) {
   return { url: still || null, primary: false };
 }
 
-async function getLandscapeUrl(id, tmdbKey = null) {
+async function getLandscapeUrl(id, tmdbKey = null, options = {}) {
   if (!/^\d+$/.test(id)) throw new Error("Invalid Kitsu artwork ID");
-  const credential = crypto.createHash("sha256").update(tmdbKey || "").digest("hex");
+  const provider = options.provider === "topposters" ? "topposters" : "tmdb";
+  const topPosterKey = provider === "topposters" && typeof options.topPosterKey === "string" ? options.topPosterKey.trim() : "";
+  const credential = crypto.createHash("sha256").update(JSON.stringify([tmdbKey || "", provider, topPosterKey])).digest("hex");
   const key = `${credential}:${id}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < hit.ttl) return hit.url;
   if (!pending.has(key)) {
-    pending.set(key, resolveLandscape(id, tmdbKey).then(result => {
+    pending.set(key, (async () => {
+      if (topPosterKey) {
+        // The documented fallback_url redirects on missing artwork, disabled
+        // banners, expired keys and exhausted quotas. Only horizontal artwork
+        // is passed; failure to load Kitsu must not prevent direct Kitsu lookup.
+        let fallback = null;
+        try { fallback = await resolveLandscape(id, tmdbKey); } catch (_) {}
+        return { url: bannerUrl(topPosterKey, id, fallback?.url), primary: Boolean(fallback?.primary) };
+      }
+      return resolveLandscape(id, tmdbKey);
+    })().then(result => {
       if (result.url) {
         if (cache.size >= 1000) cache.delete(cache.keys().next().value);
         // Retry provider outages soon instead of locking an installation onto
@@ -67,21 +80,21 @@ async function getLandscapeUrl(id, tmdbKey = null) {
   return pending.get(key);
 }
 
-async function landscapePreview(meta, tmdbKey = null) {
+async function landscapePreview(meta, tmdbKey = null, options = {}) {
   const id = meta.id.match(/^kitsu:(\d+)$/)?.[1];
   if (!id) return { ...meta };
   let url = null;
-  try { url = await getLandscapeUrl(id, tmdbKey); } catch (_) { /* No invented portrait fallback. */ }
+  try { url = await getLandscapeUrl(id, tmdbKey, options); } catch (_) { /* No invented portrait fallback. */ }
   return { ...meta, poster: url || undefined, background: url || undefined, landscapePoster: url || undefined, posterShape: "landscape" };
 }
 
-async function landscapePage(metas, tmdbKey) {
+async function landscapePage(metas, tmdbKey, options = {}) {
   const output = new Array(metas.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(6, metas.length) }, async () => {
     while (next < metas.length) {
       const index = next++;
-      output[index] = await landscapePreview(metas[index], tmdbKey);
+      output[index] = await landscapePreview(metas[index], tmdbKey, options);
     }
   }));
   return output;

@@ -115,3 +115,34 @@ test('empty catalog HTTP responses expire after one minute instead of proxy defa
   assert.match(r.headers.get('cache-control'),/^max-age=60,/);assert.deepEqual((await r.json()).metas,[]);
  }
 });
+
+test('TOP Posters uses the exact Kitsu banner endpoint with a real horizontal fallback and isolated credentials',async()=>{
+ const art=load(file,{'node-fetch':async()=>response({subtype:'ONA',coverImage:{original:'https://media.kitsu.app/horizontal.jpg'}}),'./tmdb-artwork':{getBackdrop:async()=>null}});
+ const first=await art.landscapePreview(meta,null,{provider:'topposters',topPosterKey:'TP-first'});
+ const u=new URL(first.poster);
+ assert.equal(u.origin,'https://api.top-posters.com');assert.equal(u.pathname,'/TP-first/kitsu/banner/49739.jpg');
+ assert.equal(u.searchParams.get('fallback_url'),'https://media.kitsu.app/horizontal.jpg');
+ assert.equal(first.id,meta.id);assert.equal(first.posterShape,'landscape');assert.equal(first.background,first.poster);
+ const second=await art.landscapePreview(meta,null,{provider:'topposters',topPosterKey:'TP-second'});
+ assert.equal(new URL(second.poster).pathname,'/TP-second/kitsu/banner/49739.jpg');
+ const original=await art.landscapePreview(meta,null,{provider:'tmdb',topPosterKey:'TP-first'});
+ assert.equal(original.poster,'https://media.kitsu.app/horizontal.jpg');
+});
+
+test('TOP Posters direct Kitsu request survives Kitsu outages; missing TOP key falls back without broken provider URLs',async()=>{
+ const art=load(file,{'node-fetch':async()=>{throw Error('Kitsu offline')},'./tmdb-artwork':{getBackdrop:async()=>null}});
+ const top=await art.landscapePreview(meta,null,{provider:'topposters',topPosterKey:'TP-key'});
+ assert.equal(top.poster,'https://api.top-posters.com/TP-key/kitsu/banner/49739.jpg');
+ assert.equal((await art.landscapePreview(meta,null,{provider:'topposters'})).poster,undefined);
+});
+
+test('all catalogs forward the selected provider and keep the TMDB text key independent; portrait bypasses TOP Posters',async()=>{
+ const seen=[];const catalog=async(...args)=>{assert.equal(args.at(-1),'text-key');return[meta]};
+ const addon=load(require.resolve('../addon'),{'./services/animeunity':{getDubbedCatalog:catalog,searchDubbedCatalog:catalog,getTopDubbedCatalog:catalog,getTopAiringDubbedCatalog:catalog},'./services/artwork':{landscapePage:async(metas,key,options)=>{seen.push(options);assert.equal(key,'text-key');return metas}}});
+ const config={backdropProvider:'TOP Posters',topPosterKey:'TP-secret',tmdbKey:'text-key'};
+ for(const c of addon.manifest.catalogs){
+  await addon.get('catalog',c.type,c.id,{search:'x'},{...config,posterOrientation:'landscape'});
+  const p=await addon.get('catalog',c.type,c.id,{search:'x'},config);assert.equal(p.metas[0].poster,meta.poster);
+ }
+ assert.deepEqual(seen,Array(7).fill({provider:'topposters',topPosterKey:'TP-secret'}));
+});
