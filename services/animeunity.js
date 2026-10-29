@@ -48,7 +48,8 @@ const SEARCH_API_PAGE = 30; // archivio/get-animes returns up to 30 records/page
 const MAX_SEARCH_PAGES = 6; // cap work per query (~180 results)
 
 // "Top anime doppiati ITA" catalog: the MyAnimeList top ranking intersected
-// with AnimeUnity's full dubbed archive. We walk the whole dubbed archive once
+// with a confirmed dubbed archive (AnimeUnity, with AnimeWorld fallback).
+// We walk the dubbed archive once
 // to build an index keyed by mal_id, then keep the MAL-top entries that appear
 // in it (preserving MAL rank order).
 const ARCHIVE_PAGE_LIMIT = 60; // ~1800 records: covers the full dubbed archive
@@ -307,7 +308,7 @@ async function recordsToMetas(records) {
       italianMetaCache.set(String(kitsuId), { name, description });
       // Remember what TMDB needs to localize this preview's title later.
       tmdbInfoCache.set(String(kitsuId), {
-        isMovie: !isSeries(a),
+        isMovie: a.type === "Movie",
         titles: [stripIta(a.title_eng), stripIta(a.title)].filter(Boolean),
         year: a.date ? String(a.date).slice(0, 4) : undefined,
       });
@@ -595,36 +596,50 @@ function buildDubbedIndex() {
 }
 
 async function loadDubbedIndex() {
-  if (dubbedIndexCache && Date.now() - dubbedIndexCache.builtAt < DUBBED_INDEX_TTL_MS) {
-    return dubbedIndexCache.index;
-  }
-
+  const cached = dubbedIndexCache;
+  if (cached && Date.now() - cached.builtAt < cached.ttl) return cached.index;
   const index = new Map();
-  let offset = 0;
-  for (let page = 0; page < ARCHIVE_PAGE_LIMIT; page++) {
-    let records;
+  try {
+    let offset = 0;
+    for (let page = 0; page < ARCHIVE_PAGE_LIMIT; page++) {
+      const records = await fetchSearchPage("", offset);
+      if (!records.length) break;
+      offset += records.length;
+      for (const record of records) if (record.mal_id != null && !index.has(String(record.mal_id))) index.set(String(record.mal_id), record);
+      if (records.length < SEARCH_API_PAGE) break;
+    }
+    if (!index.size) throw new Error("AnimeUnity dubbed archive is empty");
+    dubbedIndexCache = { index, builtAt: Date.now(), ttl: DUBBED_INDEX_TTL_MS };
+    return index;
+  } catch (error) {
+    console.error(`AnimeUnity archive unavailable: ${error.message}`);
+    // A cold restart used to lose all three Top rows here. The alternate
+    // archive confirms dubbed audio; MAL still supplies ranking and ordering.
     try {
-      records = await fetchSearchPage("", offset);
-    } catch (err) {
-      console.error(`AnimeUnity archive failed at offset ${offset}: ${err.message}`);
-      if (dubbedIndexCache) return dubbedIndexCache.index;
-      throw err;
-    }
-    if (records.length === 0) break;
-    offset += records.length;
-    for (const r of records) {
-      if (r.mal_id != null && !index.has(String(r.mal_id))) {
-        index.set(String(r.mal_id), r);
+      const [archiveResult, latestResult] = await Promise.allSettled([
+        animeworld.getDubbedArchive(), animeworld.getDubbedRecords(),
+      ]);
+      const result = archiveResult.status === "fulfilled" ? archiveResult.value : { records: [], complete: false };
+      const latest = latestResult.status === "fulfilled" ? latestResult.value : [];
+      const alternate = new Map();
+      // Recent confirmed dubs also cover newly airing shows before the full
+      // archive scan finishes, preserving MAL's airing ranking as well.
+      for (const record of [...result.records, ...latest]) {
+        if (record._dubbed && record.mal_id != null && !alternate.has(String(record.mal_id))) alternate.set(String(record.mal_id), record);
       }
+      if (!alternate.size) throw new Error("AnimeWorld archive has no verified MAL mappings");
+      dubbedIndexCache = { index: alternate, builtAt: Date.now(), ttl: result.complete ? DUBBED_INDEX_TTL_MS : 60000 };
+      return alternate;
+    } catch (fallbackError) {
+      if (cached && Date.now() - cached.builtAt < SOURCE_STALE_MS) return cached.index;
+      throw new Error(`Dubbed archives unavailable: ${error.message}; ${fallbackError.message}`);
     }
-    if (records.length < SEARCH_API_PAGE) break; // last page
   }
-
-  if (index.size === 0) throw new Error("AnimeUnity dubbed archive is empty");
-  dubbedIndexCache = { index, builtAt: Date.now() };
-  debug(`buildDubbedIndex: ${index.size} dubbed anime indexed by mal_id`);
-  return index;
 }
+
+// An incomplete alternate archive must not freeze Top rows for six hours.
+const topTtl = () => Math.min(TOP_CATALOG_TTL_MS, dubbedIndexCache?.ttl || TOP_CATALOG_TTL_MS);
+const topFresh = cached => cached && Date.now() - cached.builtAt < (cached.ttl || TOP_CATALOG_TTL_MS);
 
 // Match MyAnimeList's top ranking against the dubbed archive, preserving MAL
 // rank order, and return the matched raw records. Cached once and shared by the
@@ -638,12 +653,11 @@ function getTopDubbedRecords() {
 }
 
 async function loadTopDubbedRecords() {
-  if (topRecordsCache && Date.now() - topRecordsCache.builtAt < TOP_CATALOG_TTL_MS) {
+  if (topFresh(topRecordsCache)) {
     return topRecordsCache.records;
   }
 
-  const index = await buildDubbedIndex();
-  const top = await getTopAnime(MAX_TOP_MAL_PAGES);
+  const [index, top] = await Promise.all([buildDubbedIndex(), getTopAnime(MAX_TOP_MAL_PAGES)]);
 
   const matched = [];
   const seen = new Set();
@@ -656,7 +670,7 @@ async function loadTopDubbedRecords() {
   }
 
   debug(`getTopDubbedRecords: ${matched.length} MAL-top anime are dubbed`);
-  topRecordsCache = { records: matched, builtAt: Date.now() };
+  topRecordsCache = { records: matched, builtAt: Date.now(), ttl: topTtl() };
   return matched;
 }
 
@@ -664,13 +678,13 @@ async function loadTopDubbedRecords() {
 // MAL-top dubbed records filtered by kind, mapped to Kitsu metas. Cached per kind.
 async function buildTopDubbedCatalog(kind) {
   const cached = topMetaCache[kind];
-  if (cached && Date.now() - cached.builtAt < TOP_CATALOG_TTL_MS) {
+  if (topFresh(cached)) {
     return cached.metas;
   }
   const records = filterByKind(await getTopDubbedRecords(), kind);
   const metas = await recordsToMetas(records);
   if (records.length && !metas.length) throw new Error("Kitsu mappings unavailable for top catalog");
-  topMetaCache[kind] = { metas, builtAt: Date.now() };
+  topMetaCache[kind] = { metas, builtAt: Date.now(), ttl: topTtl() };
   return metas;
 }
 
@@ -684,12 +698,11 @@ async function getTopDubbedCatalog(kind, skip, tmdbKey) {
 // Match MyAnimeList's top *airing* ranking against the dubbed archive,
 // preserving MAL rank order, and return the matched raw records.
 async function getTopAiringDubbedRecords() {
-  if (airingRecordsCache && Date.now() - airingRecordsCache.builtAt < TOP_CATALOG_TTL_MS) {
+  if (topFresh(airingRecordsCache)) {
     return airingRecordsCache.records;
   }
 
-  const index = await buildDubbedIndex();
-  const top = await getTopAnime(MAX_AIRING_MAL_PAGES, "airing");
+  const [index, top] = await Promise.all([buildDubbedIndex(), getTopAnime(MAX_AIRING_MAL_PAGES, "airing")]);
 
   const matched = [];
   const seen = new Set();
@@ -701,20 +714,20 @@ async function getTopAiringDubbedRecords() {
   }
 
   debug(`getTopAiringDubbedRecords: ${matched.length} MAL-top airing anime are dubbed`);
-  airingRecordsCache = { records: matched, builtAt: Date.now() };
+  airingRecordsCache = { records: matched, builtAt: Date.now(), ttl: topTtl() };
   return matched;
 }
 
 // Build the "Top anime in onda ITA" catalog: matched airing dubbed records
 // mapped to Kitsu metas (both series and movies — the row is a single mix).
 async function buildTopAiringDubbedCatalog() {
-  if (airingMetaCache && Date.now() - airingMetaCache.builtAt < TOP_CATALOG_TTL_MS) {
+  if (topFresh(airingMetaCache)) {
     return airingMetaCache.metas;
   }
   const records = await getTopAiringDubbedRecords();
   const metas = await recordsToMetas(records);
   if (records.length && !metas.length) throw new Error("Kitsu mappings unavailable for airing catalog");
-  airingMetaCache = { metas, builtAt: Date.now() };
+  airingMetaCache = { metas, builtAt: Date.now(), ttl: topTtl() };
   return metas;
 }
 

@@ -53,6 +53,7 @@ test('all three top catalogs recover after an archive failure and share archive 
     },
     './mal': { getTopAnime: async () => [{ mal_id: 1 }, { mal_id: 2 }] },
     './tmdb': {},
+    './animeworld': { getDubbedArchive: async () => { throw Error('offline'); }, getDubbedRecords: async () => { throw Error('offline'); } },
   });
   await assert.rejects(animeunity.getTopDubbedCatalog('series', 0), /503/);
   const [series, movies, airing] = await Promise.all([
@@ -124,4 +125,35 @@ test('MAL terminal 404 preserves valid pages; unrelated errors still reject', as
   assert.equal((await mal.getTopAnime(20, 'airing')).length, 50);
   unrelated = true;
   await assert.rejects(mal.getTopAnime(20), /MyAnimeList top error: 404/);
+});
+
+test('cold AnimeUnity DNS outage retains all three Top catalogs using confirmed AnimeWorld records in MAL order', async () => {
+  let scans=0, feeds=0;
+  const record=(id,type='TV',dub=true)=>({id:`aw:${id}`,mal_id:id,title:`Title ${id}`,type,_dubbed:dub});
+  const au=loadService('animeunity',{
+    'node-fetch':async url=>{
+      if(url.startsWith('https://www.animeunity.so'))throw Error('getaddrinfo ENOTFOUND');
+      const id=new URL(url).searchParams.get('filter[externalId]');return response({included:[{id}]});
+    },
+    './animeworld':{
+      getDubbedArchive:async()=>{scans++;return{records:[record(1),record(2,'Movie'),record(99,'TV',false)],complete:true}},
+      getDubbedRecords:async()=>{feeds++;return[record(3)]},
+    },
+    './mal':{getTopAnime:async(_pages,filter)=>filter==='airing'?[{mal_id:3},{mal_id:1}]:[{mal_id:2},{mal_id:99},{mal_id:1}]},'./tmdb':{},
+  });
+  const [series,movies,airing]=await Promise.all([au.getTopDubbedCatalog('series',0),au.getTopDubbedCatalog('movie',0),au.getTopAiringDubbedCatalog(0)]);
+  assert.deepEqual(series.map(x=>x.id),['kitsu:1']);assert.deepEqual(movies.map(x=>x.id),['kitsu:2']);
+  assert.deepEqual(airing.map(x=>x.id),['kitsu:3','kitsu:1']);assert.equal(scans,1);assert.equal(feeds,1);
+});
+
+test('partial AnimeWorld archives refresh all derived Top caches after a minute instead of freezing missing titles',async t=>{
+  let now=100000,scans=0;t.mock.method(Date,'now',()=>now);
+  const au=loadService('animeunity',{
+    'node-fetch':async url=>{if(url.includes('animeunity.so'))throw Error('DNS');return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
+    './animeworld':{getDubbedArchive:async()=>({complete:false,records:Array.from({length:++scans},(_,i)=>({id:`aw:${i+1}`,mal_id:i+1,type:'TV',title:'Example',_dubbed:true}))}),getDubbedRecords:async()=>[]},
+    './mal':{getTopAnime:async()=>[{mal_id:2},{mal_id:1}]},'./tmdb':{},
+  });
+  assert.deepEqual((await au.getTopDubbedCatalog('series',0)).map(x=>x.id),['kitsu:1']);
+  now+=60001;
+  assert.deepEqual((await au.getTopDubbedCatalog('series',0)).map(x=>x.id),['kitsu:2','kitsu:1']);assert.equal(scans,2);
 });

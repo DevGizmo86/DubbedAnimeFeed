@@ -5,12 +5,101 @@ const episodeNumber = require("./episode-numbers");
 
 // Only metadata is requested: homepage and title pages, never video servers.
 const BASE = "https://www.animeworld.ac";
-const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.10)";
+const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.14)";
 const DETAIL_TTL = 12 * 60 * 60 * 1000;
 const details = new Map();
 const pending = new Map();
 const episodeDetails = new Map();
 const EPISODE_TTL = 10 * 60 * 1000;
+let archive = null;
+let archivePending = null;
+const ARCHIVE_TTL = 12 * 60 * 60 * 1000;
+
+function parseArchive(text, page) {
+  const $ = cheerio.load(text);
+  const cards = $(".film-list .item");
+  if (!cards.length) {
+    if ($('.film-list').length && $('form[action="/filter"]').length) return { records: [], hasNext: false };
+    throw new Error("AnimeWorld dubbed archive is unavailable or unrecognized");
+  }
+  const records = [];
+  cards.each((_, element) => {
+    const card = $(element);
+    if (!card.find(".dub").length) return;
+    const link = card.find("a.name").first();
+    const slug = (link.attr("href") || "").match(/^\/play\/([\w.-]+)$/)?.[1];
+    if (!slug) return;
+    records.push({ id: `aw:${slug}`, _url: `${BASE}/play/${slug}`, title: link.text().trim(), imageurl: card.find("img").first().attr("src") });
+  });
+  if (!records.length) throw new Error("AnimeWorld archive did not return dubbed records");
+  const linkedNext = $("a[href]").toArray().some(a => {
+    try {
+      const url = new URL($(a).attr("href"), BASE);
+      return url.origin === BASE && url.pathname === "/filter" && Number(url.searchParams.get("page")) === page + 1;
+    } catch (_) { return false; }
+  });
+  // The live page also builds pagination in JS, sometimes with maxPage=NaN.
+  // In that case follow full 40-card pages until a verified empty/short page.
+  const maxPage = Number(text.match(/paginationMaxPage\s*=\s*parseInt\("(\d+)"\)/)?.[1]);
+  const hasNext = linkedNext || (maxPage > 0 ? page < maxPage : cards.length >= 40);
+  return { records, hasNext };
+}
+
+async function loadDubbedArchive() {
+  if (!archive || Date.now() - archive.at >= ARCHIVE_TTL) {
+    archive = { at: Date.now(), page: 1, queue: [], failed: [], records: new Map(), seen: new Set(), lastPage: false, complete: false };
+  }
+  const state = archive;
+  if (state.complete) return { records: [...state.records.values()], complete: true };
+  // Work is bounded per request; retain the cursor and unfinished records so
+  // later refreshes continue rather than repeatedly scanning the first page.
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline && !state.complete) {
+    if (!state.queue.length) {
+      if (state.lastPage) {
+        state.complete = !state.failed.length;
+        state.queue.push(...state.failed.splice(0));
+        if (!state.queue.length) break;
+      } else {
+        let result;
+        try {
+          const page = await html(`${BASE}/filter?dub=1&sort=7&page=${state.page}`, Math.min(5000, Math.max(1, deadline - Date.now())));
+          result = parseArchive(page, state.page);
+          state.page++;
+        } catch (error) {
+          if (state.records.size) break;
+          throw error;
+        }
+        let added = 0;
+        for (const record of result.records) {
+          if (!state.seen.has(record.id)) { state.seen.add(record.id); state.queue.push(record); added++; }
+        }
+        state.lastPage = !result.hasNext || state.page > 60 || !added;
+      }
+    }
+    const batch = state.queue.splice(0, 6);
+    if (!batch.length) continue;
+    await Promise.all(batch.map(async ({ _url, ...record }) => {
+      try {
+        const detail = await getDetail(_url, Math.min(5000, Math.max(1, deadline - Date.now())));
+        // DUB on the list and Italian audio on the detail page are both required.
+        if (detail._dubbed && detail.mal_id) state.records.set(record.id, { ...record, ...detail, _source: "AnimeWorld" });
+      } catch (_) { state.failed.push({ ...record, _url }); }
+    }));
+    // Failed details are retried on the next refresh, not in a hot loop.
+    if (!state.queue.length && state.lastPage) {
+      state.complete = !state.failed.length;
+      break;
+    }
+  }
+  if (!state.records.size) throw new Error("AnimeWorld dubbed archive has no verified records yet");
+  return { records: [...state.records.values()], complete: state.complete };
+}
+
+function getDubbedArchive() {
+  if (!archivePending) archivePending = loadDubbedArchive().finally(() => { archivePending = null; });
+  return archivePending;
+}
 
 async function html(url, timeout = 10000) {
   const response = await fetch(url, {
@@ -189,4 +278,4 @@ async function getDubbedRecords() {
   return records;
 }
 
-module.exports = { getDubbedRecords, getDubbedEpisodes, parseFeed, parseDetail, parseSearch, episodeNumber };
+module.exports = { getDubbedRecords, getDubbedArchive, getDubbedEpisodes, parseFeed, parseDetail, parseSearch, parseArchive, episodeNumber };

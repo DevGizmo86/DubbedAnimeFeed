@@ -176,30 +176,45 @@ né ID delle fonti. La chiave TMDB opzionale nell'addon mantiene la priorità
 per le traduzioni italiane; la chiave impostata in Nuvio è usata dall'app.
 
 
-### Orientamento immagini (1.5.7)
+### Orientamento immagini e chiave TMDB (1.5.14)
 
-Nella pagina di configurazione scegli `portrait` (verticale, predefinito) o
-`landscape` (orizzontale). La scelta si applica a tutti i cataloghi, ricerca
-compresa. Landscape recupera sempre il `background` da EasyCatalogs tramite
-ID Kitsu esatto e tipo (serie/film), anche quando la fonte del catalogo fornisce
-già una copertina. Non usa le immagini di copertina AnimeUnity/AnimeWorld.
-Se EasyCatalogs non è disponibile o non ha uno sfondo per quell'ID, cerca la
-copertina Kitsu originale. Se anche Kitsu non ha una copertina, la sua locandina
-viene mostrata intera in un'immagine 16:9 con margini
-laterali, senza ritagliarla. Il recupero delle immagini avviene al caricamento
-delle schede, senza rallentare la risposta del catalogo, e non richiede chiavi
-API aggiuntive. Entrambi i campi `poster` e `background` delle anteprime landscape
-usano la nuova immagine; l'URL è versionato per evitare la cache del vecchio
-ritaglio. Installa il link generato dalla nuova
-configurazione per applicare la scelta.
+Nella configurazione scegli `portrait` (predefinito) o `landscape`, per tutti i
+cataloghi e la ricerca. Per i veri backdrop TMDB inserisci nel campo **Chiave
+API TMDB** la stessa chiave che usi in Nuvio, poi reinstalla il link generato.
+Nuvio non trasmette la propria chiave al server dell'addon.
 
-Gli URL delle immagini usano il dominio pubblico inoltrato dal proxy. Su Beamup,
-se `Host` contiene il solo nome interno dell'app, viene ricostruito il dominio
-HTTPS pubblico `.baby-beamup.club`. Per altri reverse proxy è possibile impostare
-`PUBLIC_URL=https://dominio-pubblico.example` per fissare l'origine delle immagini.
-Tutte le immagini landscape vengono verificate e adattate a 960×540 senza
-ritagli, incluse le copertine Kitsu molto panoramiche. Se lo sfondo EasyCatalogs
-non è scaricabile si prova Kitsu; se manca la copertina si prova la sua locandina.
+Il resolver legge il titolo tramite ID Kitsu e prova le corrispondenze TMDB,
+IMDb e TVDB disponibili, poi una ricerca per titolo esatto e anno. Il tipo
+TMDB viene determinato dal sottotipo Kitsu: ONA e OVA vengono cercate come
+serie, anche quando compaiono nella nostra riga film. L'ID del catalogo e gli
+ID degli episodi rimangono Kitsu.
+
+Le immagini provengono direttamente da TMDB, senza EasyCatalogs. Si preferiscono
+backdrop 16:9 in italiano, senza testo oppure in inglese. Se mancano, si cerca
+un vero fotogramma TMDB, una copertina orizzontale Kitsu o un'immagine di episodio
+Kitsu. Non vengono usati poster verticali, bande aggiunte o sfondi sfocati.
+Se nessuna fonte ha un'immagine orizzontale, l'addon non inventa un'immagine di
+ripiego. Le nuove anteprime espongono URL CDN diretti, senza la chiave API negli
+URL delle immagini. La chiave resta nella configurazione dell'addon.
+
+I vecchi URL immagine restano supportati durante il rinnovo delle cache. Per
+proxy personalizzati è disponibile `PUBLIC_URL=https://dominio.example`;
+gli hostname interni Beamup vengono convertiti al dominio pubblico HTTPS.
+
+### Recupero dei tre cataloghi Top (1.5.14)
+
+La classifica e l'ordine rimangono MyAnimeList (tramite Jikan o MAL). Il filtro
+ITA usa l'archivio AnimeUnity; in caso di errore DNS o indisponibilità usa
+l'archivio doppiato AnimeWorld e i titoli doppiati recenti. Per AnimeWorld sono
+richiesti sia il badge DUB nell'elenco sia l'audio italiano nella scheda, oltre
+all'ID MAL esatto per l'incrocio con la classifica.
+
+La scansione alternativa lavora a lotti limitati e riprende dalle pagine e
+schede non completate. Finché è parziale, l'indice e i cataloghi derivati
+scadono dopo un minuto, così nuovi risultati entrano senza attendere sei ore.
+Se tutte le fonti sono indisponibili, si conserva l'ultimo indice valido per
+un massimo di 24 ore; nessun risultato vuoto dovuto a un errore viene trattato
+come una verifica di doppiaggio.
 
 ### Filtro episodi doppiati (1.5.10)
 
