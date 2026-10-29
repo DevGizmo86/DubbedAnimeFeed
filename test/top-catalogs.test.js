@@ -169,3 +169,13 @@ test('airing candidates are verified directly when the alternate archive has no 
  });
  assert.deepEqual((await au.getTopAiringDubbedCatalog(0)).map(x=>x.id),['kitsu:1','kitsu:2']);assert.equal(lookedUp.length,2);
 });
+
+test('a partial archive still verifies missing airing titles and merges in MAL order',async()=>{
+ const record=id=>({id:`aw:${id}`,mal_id:id,_dubbed:true,type:'TV',title:`Title ${id}`});
+ const au=loadService('animeunity',{
+  'node-fetch':async url=>{if(url.includes('animeunity.so'))throw Error('DNS');return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
+  './animeworld':{getDubbedArchive:async()=>({complete:false,records:[record(2)]}),getDubbedRecords:async()=>[],getDubbedMatches:async()=>[record(1),record(2)]},
+  './mal':{getTopAnime:async()=>[{mal_id:1},{mal_id:2}]},'./tmdb':{},
+ });
+ assert.deepEqual((await au.getTopAiringDubbedCatalog(0)).map(x=>x.id),['kitsu:1','kitsu:2']);
+});
