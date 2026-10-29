@@ -1,6 +1,6 @@
 {
   "name": "dubbed-anime-feed",
-  "version": "1.5.16",
+  "version": "1.5.17",
   "description": "Stremio addon: ultime uscite di anime doppiati in italiano da AnimeUnity e AnimeWorld, con ID Kitsu e cataloghi di ricerca e classifiche.",
   "main": "index.js",
   "scripts": {

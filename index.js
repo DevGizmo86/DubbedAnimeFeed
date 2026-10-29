@@ -23,6 +23,7 @@ const landingTemplate = require("stremio-addon-sdk/src/landingTemplate");
 const addonInterface = require("./addon");
 const { getLandscapeArtwork, absoluteArtwork, publicOrigin } = require("./services/artwork");
 const {
+  getCatalogStatus,
   getDubbedCatalog,
   getTopDubbedCatalog,
   getTopAiringDubbedCatalog,
@@ -143,6 +144,11 @@ const sendLanding = (_, res) => {
 };
 app.get("/", (_, res) => res.redirect("/configure"));
 app.get("/configure", sendLanding);
+// Aggregate counts only: no credentials, configured URLs or user data.
+app.get("/health", (_, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ version: addonInterface.manifest.version, catalogs: getCatalogStatus() });
+});
 
 app.listen(PORT, () => {
   console.log(`Addon attivo su http://localhost:${PORT}`);

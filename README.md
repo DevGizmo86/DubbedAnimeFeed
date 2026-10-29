@@ -250,3 +250,11 @@ anime da un altro catalogo se Nuvio sceglie questi metadati. Non richiede modifi
 a Nuvio; se il client sceglie un altro provider meta, viene usata la sua lista.
 La presenza sulle fonti monitorate non garantisce uno stream italiano negli
 addon di riproduzione installati.
+
+### Cache e controllo fonti (1.5.17)
+
+Le risposte dei cataloghi dichiarano una cache HTTP di 60 secondi per evitare
+che un risultato parziale o vuoto rimanga memorizzato per ore dal proxy.
+`/health` espone solo versione, conteggi delle classifiche e stato aggregato
+delle verifiche ITA (timeout, errori HTTP, corrispondenze), senza chiavi TMDB
+o URL di configurazione. Non avvia richieste aggiuntive alle fonti.

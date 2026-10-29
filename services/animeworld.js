@@ -5,7 +5,7 @@ const episodeNumber = require("./episode-numbers");
 
 // Only metadata is requested: homepage and title pages, never video servers.
 const BASE = "https://www.animeworld.ac";
-const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.16)";
+const UA = "Mozilla/5.0 (compatible; DubbedAnimeFeed/1.5.17)";
 const DETAIL_TTL = 12 * 60 * 60 * 1000;
 const details = new Map();
 const pending = new Map();
@@ -233,6 +233,13 @@ function parseSearch(text, title = null) {
 
 const rankedMatches = new Map();
 const rankedPending = new Map();
+let rankedStatus = { attempted: 0, searchResults: 0, detailResults: 0, italian: 0, exact: 0, failures: {} };
+function recordRankedFailure(error) {
+  const code = error.type === "request-timeout" || /timed? ?out/i.test(error.message) ? "timeout"
+    : /metadata error: \d+/.test(error.message) ? error.message.match(/\d+/)[0]
+    : /missing|unrecognized/i.test(error.message) ? "unrecognized" : "network";
+  rankedStatus.failures[code] = (rankedStatus.failures[code] || 0) + 1;
+}
 async function findRankedDub(entry, deadline) {
   const remaining = () => {
     const ms = deadline - Date.now();
@@ -245,20 +252,26 @@ async function findRankedDub(entry, deadline) {
   if (hit && Date.now() - hit.at < (hit.record ? DETAIL_TTL : 60000)) return hit.record;
   if (!rankedPending.has(id)) {
     rankedPending.set(id, (async () => {
+      rankedStatus.attempted++;
       const urls = parseSearch(await html(`${BASE}/search?keyword=${encodeURIComponent(entry.title)}`, remaining()), entry.title);
+      rankedStatus.searchResults += urls.length;
       const results = await Promise.allSettled(urls.map(async url => {
         const detail = await getDetail(url, remaining());
+        rankedStatus.detailResults++;
+        if (detail._dubbed) rankedStatus.italian++;
         if (!detail._dubbed || String(detail.mal_id) !== id) return null;
+        rankedStatus.exact++;
         const slug = new URL(url).pathname.slice("/play/".length);
         return { ...detail, id: `aw:${slug}`, title: entry.title, _source: "AnimeWorld" };
       }));
+      for (const result of results) if (result.status === "rejected") recordRankedFailure(result.reason);
       const record = results.find(r => r.status === "fulfilled" && r.value)?.value || null;
       if (record || results.every(r => r.status === "fulfilled")) {
         if (rankedMatches.size >= 1000) rankedMatches.delete(rankedMatches.keys().next().value);
         rankedMatches.set(id, { record, at: Date.now() });
       }
       return record;
-    })().catch(() => null).finally(() => rankedPending.delete(id)));
+    })().catch(error => { recordRankedFailure(error); return null; }).finally(() => rankedPending.delete(id)));
   }
   return rankedPending.get(id);
 }
@@ -349,4 +362,8 @@ async function getDubbedRecords() {
   return records;
 }
 
-module.exports = { getDubbedRecords, getDubbedArchive, getDubbedMatches, getDubbedEpisodes, parseFeed, parseDetail, parseSearch, parseArchive, episodeNumber };
+function getRankedStatus() {
+  return { ...rankedStatus, failures: { ...rankedStatus.failures }, cursor: rankedScan.cursor, verified: [...rankedMatches.values()].filter(hit => hit.record).length };
+}
+
+module.exports = { getRankedStatus, getDubbedRecords, getDubbedArchive, getDubbedMatches, getDubbedEpisodes, parseFeed, parseDetail, parseSearch, parseArchive, episodeNumber };

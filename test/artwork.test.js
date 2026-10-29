@@ -104,3 +104,14 @@ test('HTTP configured catalogs return direct CDN URLs and legacy artwork route r
   const image=await fetch(`${base}/artwork/landscape/movie/49739.jpg`);
   assert.match(image.headers.get('content-type'),/image\/jpeg/);assert.deepEqual(Buffer.from(await image.arrayBuffer()),jpeg);
 });
+
+test('empty catalog HTTP responses expire after one minute instead of proxy defaults',async t=>{
+ const catalog=async()=>[];
+ const addon=load(require.resolve('../addon'),{'./services/animeunity':{getDubbedCatalog:catalog,searchDubbedCatalog:catalog,getTopDubbedCatalog:catalog,getTopAiringDubbedCatalog:catalog}});
+ const app=express();app.use(require('stremio-addon-sdk').getRouter(addon));
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));t.after(()=>new Promise(r=>server.close(r)));
+ for(const c of addon.manifest.catalogs){
+  const r=await fetch(`http://127.0.0.1:${server.address().port}/catalog/${c.type}/${c.id}.json`);
+  assert.match(r.headers.get('cache-control'),/^max-age=60,/);assert.deepEqual((await r.json()).metas,[]);
+ }
+});

@@ -70,3 +70,15 @@ test("configuration renders an unchecked accessible option with the source expla
   assert.match(keyHelp.text(), /non la trasmette automaticamente/);
   assert.match(keyHelp.text(), /senza EasyCatalogs/);
 });
+
+test('health exposes aggregate source status without caching or fetching providers',()=>{
+ const routes=new Map();const app={use(){},get(route,handler){routes.set(route,handler)},listen(){}};
+ const status={airingRecords:0,airingMetas:0,rankings:[],verification:{failures:{timeout:1}}};
+ loadWithMocks(require.resolve('../index'),{
+  express:Object.assign(()=>app,{static:()=>()=>{}}),'./addon':addon,
+  './services/animeunity':{getCatalogStatus:()=>status},
+  'stremio-addon-sdk':{getRouter:()=>()=>{}},
+ });
+ let body,cache;routes.get('/health')({}, {setHeader(name,value){cache=value},json(value){body=value}});
+ assert.equal(cache,'no-store');assert.deepEqual(body,{version:addon.manifest.version,catalogs:status});
+});
