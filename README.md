@@ -180,12 +180,17 @@ per le traduzioni italiane; la chiave impostata in Nuvio è usata dall'app.
 
 Nella pagina di configurazione scegli `portrait` (verticale, predefinito) o
 `landscape` (orizzontale). La scelta si applica a tutti i cataloghi, ricerca
-compresa. Landscape usa l'immagine di copertina orizzontale del titolo; quando
-manca, cerca la copertina Kitsu tramite ID esatto. Se anche Kitsu non ha una
-copertina, la locandina viene mostrata intera in un'immagine 16:9 con margini
+compresa. Landscape recupera sempre il `background` da EasyCatalogs tramite
+ID Kitsu esatto e tipo (serie/film), anche quando la fonte del catalogo fornisce
+già una copertina. Non usa le immagini di copertina AnimeUnity/AnimeWorld.
+Se EasyCatalogs non è disponibile o non ha uno sfondo per quell'ID, cerca la
+copertina Kitsu originale. Se anche Kitsu non ha una copertina, la sua locandina
+viene mostrata intera in un'immagine 16:9 con margini
 laterali, senza ritagliarla. Il recupero delle immagini avviene al caricamento
 delle schede, senza rallentare la risposta del catalogo, e non richiede chiavi
-API aggiuntive. Installa il link generato dalla nuova
+API aggiuntive. Entrambi i campi `poster` e `background` delle anteprime landscape
+usano la nuova immagine; l'URL è versionato per evitare la cache del vecchio
+ritaglio. Installa il link generato dalla nuova
 configurazione per applicare la scelta.
 
 ### Filtro episodi doppiati (1.5.10)
