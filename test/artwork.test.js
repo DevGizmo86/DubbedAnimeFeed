@@ -17,18 +17,22 @@ function load(filename, mocks) {
 const artworkFile = require.resolve("../services/artwork");
 const meta = { id: "kitsu:55", type: "series", name: "Example", poster: "https://images.example/poster.jpg" };
 
-test("missing covers use a local horizontal image while existing covers and shared previews remain intact", () => {
+test("all previews resolve by Kitsu ID even when source covers exist, without mutating shared data", () => {
   const art = load(artworkFile, {});
   const copy = { ...meta };
-  assert.equal(art.landscapePreview(meta).poster, "/artwork/landscape/55.jpg");
+  assert.equal(art.landscapePreview(meta).poster, "/artwork/landscape/series/55.jpg?v=2");
   assert.deepEqual(meta, copy);
-  assert.equal(art.landscapePreview({ ...meta, background: meta.poster }).poster, "/artwork/landscape/55.jpg");
-  assert.equal(art.landscapePreview({ ...meta, background: "https://images.example/cover.jpg" }).poster, "https://images.example/cover.jpg");
+  assert.equal(art.landscapePreview({ ...meta, background: meta.poster }).poster, "/artwork/landscape/series/55.jpg?v=2");
+  const resolved = art.landscapePreview({ ...meta, background: "https://images.example/cover.jpg" });
+  assert.equal(resolved.poster, "/artwork/landscape/series/55.jpg?v=2");
+  assert.equal(resolved.background, resolved.poster);
+  assert.equal(art.landscapePreview({ ...meta, type: "movie" }).poster, "/artwork/landscape/movie/55.jpg?v=2");
 });
 
 test("Kitsu covers resolve by exact ID and concurrent image requests share a cached lookup", async () => {
   let calls = 0;
   const art = load(artworkFile, { "node-fetch": async (url) => {
+    if (url.includes("easycatalogs")) throw new Error("offline");
     calls++;
     assert.equal(url, "https://kitsu.io/api/edge/anime/55");
     return { ok: true, json: async () => ({ data: { id: "55", attributes: { coverImage: { large: "https://images.example/cover.jpg" } } } }) };
@@ -40,7 +44,36 @@ test("Kitsu covers resolve by exact ID and concurrent image requests share a cac
   await assert.rejects(art.getLandscapeArtwork("https://example.com"), /Invalid/);
 });
 
-test("poster fallback keeps the top and bottom in a real 16:9 image, including during Kitsu outages", async () => {
+test("EasyCatalogs background is preferred over its portrait poster, with exact ID and type and separate caches", async () => {
+  const urls = [];
+  const art = load(artworkFile, { "node-fetch": async (url) => {
+    urls.push(url);
+    const type = url.includes("/movie/") ? "movie" : "series";
+    assert.equal(url, `https://easycatalogs.sonnysini.uk/meta/${type}/kitsu%3A55.json`);
+    return { ok: true, json: async () => ({ meta: { id: "kitsu:55", type, poster: meta.poster, background: `https://image.tmdb.org/t/p/original/${type}.jpg` } }) };
+  } });
+  assert.deepEqual(await art.getLandscapeArtwork("55", "series"), { redirect: "https://image.tmdb.org/t/p/original/series.jpg" });
+  assert.deepEqual(await art.getLandscapeArtwork("55", "movie"), { redirect: "https://image.tmdb.org/t/p/original/movie.jpg" });
+  await art.getLandscapeArtwork("55", "series");
+  assert.equal(urls.length, 2);
+});
+
+test("unrelated EasyCatalogs results, portrait backgrounds and invalid URLs fall back to original Kitsu cover", async () => {
+  const wrong = [
+    { id: "kitsu:99", type: "series", background: "https://images.example/wrong.jpg" },
+    { id: "kitsu:55", type: "movie", background: "https://images.example/wrong.jpg" },
+    { id: "kitsu:55", type: "series", background: meta.poster, poster: meta.poster },
+    { id: "kitsu:55", type: "series", background: "file:///etc/passwd" },
+  ];
+  for (const bad of wrong) {
+    const art = load(artworkFile, { "node-fetch": async (url) => ({ ok: true, json: async () => url.includes("easycatalogs")
+      ? { meta: bad }
+      : { data: { id: "55", attributes: { coverImage: { original: "https://images.example/original.jpg", large: "https://images.example/large.jpg" } } } } }) });
+    assert.deepEqual(await art.getLandscapeArtwork("55"), { redirect: "https://images.example/original.jpg" });
+  }
+});
+
+test("poster fallback keeps the top and bottom in a real 16:9 image, including during EasyCatalogs outages", async () => {
   const width = 60, height = 120;
   const pixels = Buffer.alloc(width * height * 3);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
@@ -50,10 +83,11 @@ test("poster fallback keeps the top and bottom in a real 16:9 image, including d
   const input = await sharp(pixels, { raw: { width, height, channels: 3 } }).png().toBuffer();
   for (const outage of [false, true]) {
     const art = load(artworkFile, { "node-fetch": async (url) => {
-      if (url.includes("kitsu.io")) {
+      if (url.includes("easycatalogs")) {
         if (outage) throw new Error("offline");
-        return { ok: true, json: async () => ({ data: { id: "55", attributes: {} } }) };
+        return { ok: true, json: async () => ({ meta: { id: "kitsu:55", type: "series" } }) };
       }
+      if (url.includes("kitsu.io")) return { ok: true, json: async () => ({ data: { id: "55", attributes: { posterImage: { original: meta.poster } } } }) };
       assert.equal(url, meta.poster);
       return { ok: true, buffer: async () => input };
     } });
@@ -92,8 +126,9 @@ test("all catalog handlers apply landscape artwork while portrait installations 
   });
   for (const c of addon.manifest.catalogs) {
     const landscape = await addon.get("catalog", c.type, c.id, { search: "example" }, { posterOrientation: "landscape" });
-    assert.equal(landscape.metas[0].poster, "/artwork/landscape/55.jpg");
+    assert.equal(landscape.metas[0].poster, "/artwork/landscape/series/55.jpg?v=2");
     assert.equal(landscape.metas[0].posterShape, "landscape");
+    assert.equal(landscape.metas[0].background, landscape.metas[0].poster);
     const portrait = await addon.get("catalog", c.type, c.id, { search: "example" }, { posterOrientation: "portrait" });
     assert.equal(portrait.metas[0].poster, meta.poster);
     assert.equal(portrait.metas[0].posterShape, "poster");
@@ -121,8 +156,9 @@ test("HTTP catalogs use absolute HTTPS artwork URLs behind Beamup and the image 
   const base = `http://127.0.0.1:${server.address().port}`;
   const response = await fetch(`${base}/catalog/series/au-dubbed-latest-series.json`, { headers: { "x-forwarded-proto": "https" } });
   const json = await response.json();
-  assert.equal(json.metas[0].poster, `${base.replace("http:", "https:")}/artwork/landscape/55.jpg`);
-  const image = await fetch(`${base}/artwork/landscape/55.jpg`);
+  assert.equal(json.metas[0].poster, `${base.replace("http:", "https:")}/artwork/landscape/series/55.jpg?v=2`);
+  assert.equal(json.metas[0].background, json.metas[0].poster);
+  const image = await fetch(`${base}/artwork/landscape/series/55.jpg?v=2`);
   assert.match(image.headers.get("content-type"), /image\/jpeg/);
   assert.equal(image.headers.get("access-control-allow-origin"), "*");
   assert.deepEqual(Buffer.from(await image.arrayBuffer()), jpeg);

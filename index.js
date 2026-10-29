@@ -115,10 +115,11 @@ app.use((req, res, next) => {
     get: async (...args) => absoluteArtwork(await addonInterface.get(...args), origin),
   })(req, res, next);
 });
-app.get("/artwork/landscape/:id.jpg", async (req, res) => {
-  if (!/^\d+$/.test(req.params.id)) return res.sendStatus(404);
+const sendLandscape = async (req, res) => {
+  const type = req.params.type || "series";
+  if (!/^\d+$/.test(req.params.id) || !["series", "movie"].includes(type)) return res.sendStatus(404);
   try {
-    const artwork = await getLandscapeArtwork(req.params.id);
+    const artwork = await getLandscapeArtwork(req.params.id, type);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=21600");
     if (artwork.redirect) return res.redirect(302, artwork.redirect);
@@ -127,7 +128,10 @@ app.get("/artwork/landscape/:id.jpg", async (req, res) => {
     console.error(`Landscape artwork ${req.params.id} failed: ${error.message}`);
     res.sendStatus(502);
   }
-});
+};
+app.get("/artwork/landscape/:type/:id.jpg", sendLandscape);
+// Keep old catalog URLs usable while clients refresh their cached previews.
+app.get("/artwork/landscape/:id.jpg", sendLandscape);
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 
 const sendLanding = (_, res) => {
