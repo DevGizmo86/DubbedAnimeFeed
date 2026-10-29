@@ -88,3 +88,11 @@ test('a timed out batch resumes at unstarted candidates instead of skipping them
  await aw.getDubbedMatches(entries);
  assert.equal(searched[firstCount],firstCount+1);
 });
+
+test('ranked diagnostics report only aggregate error categories and counts',async()=>{
+ const aw=service(async()=>{throw Error('request to https://example.invalid/?secret=value failed: network')});
+ await aw.getDubbedMatches([{mal_id:21,title:'One Piece'}]);
+ const status=aw.getRankedStatus();
+ assert.equal(status.attempted,1);assert.equal(status.verified,0);assert.equal(status.failures.network,1);
+ assert(!JSON.stringify(status).includes('secret'));assert(!JSON.stringify(status).includes('example.invalid'));
+});

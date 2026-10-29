@@ -23,7 +23,7 @@ const SEARCH_MOVIES_ID = "au-dubbed-search-movies";
 
 const manifest = {
   id: "com.dubbedanime.feed-it",
-  version: "1.5.16",
+  version: "1.5.17",
   name: "DubbedAnimeFeed",
   description:
     "Catalogo con le ultime uscite di anime doppiati in italiano e ricerca di tutti gli anime doppiati in italiano disponibili in streaming.",
@@ -156,6 +156,10 @@ builder.defineCatalogHandler(async ({ type, id, extra, config }) => {
   // Clone previews so one installation's choice cannot alter shared caches.
   const landscape = config && config.posterOrientation === "landscape";
   return {
+    // Partial source scans refresh every minute. Tell clients/CDNs too.
+    cacheMaxAge: 60,
+    staleRevalidate: 0,
+    staleError: 0,
     metas: landscape
       ? await landscapePage(metas, tmdbKey)
       : metas.map((meta) => ({ ...meta, posterShape: "poster" })),

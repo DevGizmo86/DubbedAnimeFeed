@@ -791,7 +791,18 @@ async function getDubbedEpisodes(record, total) {
   return [...numbers];
 }
 
+function getCatalogStatus() {
+  return {
+    dubbedIndex: dubbedIndexCache ? { count: dubbedIndexCache.index.size, partial: dubbedIndexCache.ttl < DUBBED_INDEX_TTL_MS } : null,
+    airingRecords: airingRecordsCache?.records.length ?? null,
+    airingMetas: airingMetaCache?.metas.length ?? null,
+    rankings: require("./mal").getRankingStatus(),
+    verification: animeworld.getRankedStatus(),
+  };
+}
+
 module.exports = {
+  getCatalogStatus,
   getDubbedCatalog,
   searchDubbedCatalog,
   getTopDubbedCatalog,

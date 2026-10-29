@@ -142,4 +142,7 @@ function getTopAnime(maxPages, filter = "") {
   return pending.get(filter);
 }
 
-module.exports = { getTopAnime, parseMalRanking };
+function getRankingStatus() {
+  return [...topCache].map(([filter, cache]) => ({ filter: filter || "overall", count: cache.list.length, ageSeconds: Math.floor((Date.now() - cache.builtAt) / 1000) }));
+}
+module.exports = { getTopAnime, parseMalRanking, getRankingStatus };
