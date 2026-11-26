@@ -371,6 +371,25 @@ async function getDubbedCatalog(kind, skip, tmdbKey) {
   return localizePage(all.slice(start, start + CATALOG_PAGE_SIZE), tmdbKey);
 }
 
+function searchableTitle(value) {
+  if (typeof value !== "string") return "";
+  return value.normalize("NFKD").toLowerCase()
+    .replace(/\p{M}/gu, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+async function searchDubbedIndex(query) {
+  const key = searchableTitle(query);
+  if (!key) return [];
+  const index = dubbedIndexCache && Date.now() - dubbedIndexCache.builtAt < SOURCE_STALE_MS
+    ? dubbedIndexCache.index
+    : await buildDubbedIndex();
+  return [...index.values()].filter(record => {
+    if (record._source === "MyAnimeList cast") return false;
+    return [record.title, record.title_it, record.title_eng, record.title_ja]
+      .some(title => searchableTitle(title).includes(key));
+  });
+}
+
 // Share searches for series and films without caching upstream errors as misses.
 const searchPending = new Map();
 async function getSearchRecords(key) {
@@ -382,9 +401,10 @@ async function getSearchRecords(key) {
       const result = { records: unique, cacheable: !partial, builtAt: Date.now() };
       if (!partial) searchRecordsCache.set(key, result);
       return result;
-    }).catch(error => {
+    }).catch(async error => {
       if (cached && Date.now() - cached.builtAt < SOURCE_STALE_MS) return cached;
-      throw error;
+      debug(`AnimeUnity search unavailable: ${error.message}`);
+      return { records: await searchDubbedIndex(key), cacheable: false };
     }).finally(() => searchPending.delete(key)));
   }
   return searchPending.get(key);

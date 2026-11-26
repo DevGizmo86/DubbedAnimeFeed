@@ -190,3 +190,36 @@ test('all Top catalogs retain MAL order with Italian cast confirmation when both
  assert.deepEqual((await au.getTopAiringDubbedCatalog(0)).map(x=>x.id),['kitsu:1','kitsu:2']);
  assert.deepEqual(au.getDubbedSources('1'),[]);
 });
+
+test('search recovers from upstream errors using verified titles without caching a partial miss', async () => {
+  let failed = true;
+  let indexes = 0;
+  let searches = 0;
+  const confirmed = [
+    { id: 1, mal_id: 1, type: 'TV', title: 'Stéins;Gate' },
+    { id: 2, mal_id: 2, type: 'Movie', title: 'Steins;Gate: The Movie' },
+  ];
+  const au = loadService('animeunity', {
+    './animeunity-source': { getArchive: async query => {
+      if (!query) { indexes++; return { records: confirmed, partial: true }; }
+      searches++;
+      if (failed) throw new Error('HTTP 503');
+      return { records: [{ id: 3, mal_id: 3, type: 'TV', title: 'Naruto' }], partial: false };
+    } },
+    'node-fetch': async url => response({ included: [{ id: new URL(url).searchParams.get('filter[externalId]') }] }),
+    './animeworld': {},
+    './mal': {},
+    './tmdb': {},
+  });
+  const [series, movies] = await Promise.all([
+    au.searchDubbedCatalog('Steins Gate', 'series', 0),
+    au.searchDubbedCatalog('Steins Gate', 'movie', 0),
+  ]);
+  assert.deepEqual(series.map(meta => meta.id), ['kitsu:1']);
+  assert.deepEqual(movies.map(meta => meta.id), ['kitsu:2']);
+  assert.equal(indexes, 1);
+  assert.equal(searches, 1);
+  assert.deepEqual(await au.searchDubbedCatalog('Naruto', 'series', 0), []);
+  failed = false;
+  assert.deepEqual((await au.searchDubbedCatalog('Naruto', 'series', 0)).map(meta => meta.id), ['kitsu:3']);
+});

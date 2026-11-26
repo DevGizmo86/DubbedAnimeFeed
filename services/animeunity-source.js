@@ -40,6 +40,7 @@ function normalizeAnime(anime) {
     anilist_id: anime.anilist_id,
     title: anime.title,
     title_it: anime.title_it,
+    title_ja: anime.title_ja,
     title_eng: anime.title,
     plot: anime.plot,
     type,

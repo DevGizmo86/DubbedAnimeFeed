@@ -25,7 +25,7 @@ L'addon **non riproduce video**: per le **fonti/streaming** serve un addon di st
 4. L'ordine combinato è **approssimativo**: AnimeWorld non espone date di pubblicazione nel feed verificato. Non vengono inventate date né confrontati numeri episodio fra anime diversi. Non viene mantenuto uno storico persistente delle prime rilevazioni.
 5. Le due categorie condividono il recupero delle fonti, con cache di 10 minuti e pre-caricamento all'avvio. Se una fonte fallisce, i risultati freschi dell'altra precedono l'ultima copia disponibile della fonte fallita. Le copie delle fonti e l'ultimo catalogo valido sono conservati **in memoria**, per un massimo di 24 ore; si perdono al riavvio. Se entrambe falliscono, si ritenta dopo un minuto. Errori di fonte o indisponibilità totale dei mapping Kitsu non sono memorizzati come cataloghi vuoti.
 
-Le ultime uscite e i cataloghi Top usano AnimeWorld come alternativa quando AnimeUnity non risponde; la ricerca continua a dipendere dall'archivio AnimeUnity. ID cataloghi, ID Kitsu, configurazione e orientamento immagini restano compatibili.
+Le ultime uscite e i cataloghi Top usano AnimeWorld come alternativa quando AnimeUnity non risponde; la ricerca può usare l'ultimo indice dei titoli verificati quando l’endpoint di ricerca di AnimeUnity fallisce. ID cataloghi, ID Kitsu, configurazione e orientamento immagini restano compatibili.
 
 **Catalogo top (classifica MAL ∩ doppiati):**
 
