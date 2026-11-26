@@ -179,6 +179,7 @@ test("AnimeUnity paginates actual Italian records and preserves confirmed pages 
 
 test("AnimeUnity catalog mapping keeps source evidence for subsequent episode requests", async () => {
   const au = load("animeunity", {
+    "./dubbed-snapshot": { archive: [], getRecent: () => [] },
     "node-fetch": async (url) => {
       return { ok: true, json: async () => ({ included: [{ id: "55" }] }) };
     },

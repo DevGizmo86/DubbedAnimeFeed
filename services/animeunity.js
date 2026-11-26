@@ -5,6 +5,7 @@ const { getTopAnime } = require("./mal");
 const tmdb = require("./tmdb");
 const animeworld = require("./animeworld");
 const animeunity = require("./animeunity-source");
+const bundledSnapshot = require("./dubbed-snapshot");
 const { getDubbedEpisodes } = animeunity;
 const KITSU_API = "https://kitsu.io/api/edge";
 
@@ -271,12 +272,15 @@ function getFeedRecords() {
   }
   if (Date.now() < feedRetryAt) {
     if (feedRecordsCache && Date.now() - feedRecordsCache.builtAt < SOURCE_STALE_MS) return Promise.resolve(feedRecordsCache);
-    return Promise.reject(new Error("Latest dubbed sources temporarily unavailable"));
+    return bundledRecentFeed();
   }
+  const bundled = !feedRecordsCache && bundledSnapshot.getRecent().length ? bundledRecentFeed() : null;
   if (!feedRecordsPending) {
     feedRecordsPending = loadFeedRecords().finally(() => { feedRecordsPending = null; });
+    // The bundled feed can be served immediately on cold start while the live feeds update.
+    if (bundled) feedRecordsPending.catch(error => debug(`Latest feed refresh failed: ${error.message}`));
   }
-  return feedRecordsPending;
+  return bundled ? Promise.resolve(bundled) : feedRecordsPending;
 }
 
 // The verified AnimeWorld feed exposes no publication timestamps. Interleave
@@ -323,11 +327,17 @@ async function loadFeedRecords() {
       };
       return feedRecordsCache;
     }
-    throw new Error("All latest dubbed sources unavailable");
+    return bundledRecentFeed();
   }
   feedRetryAt = 0;
   feedRecordsCache = { records: [...interleave(fresh), ...interleave(stale)], builtAt: now };
   return feedRecordsCache;
+}
+
+function bundledRecentFeed() {
+  const records = bundledSnapshot.getRecent();
+  if (!records.length) throw new Error("All latest dubbed sources unavailable");
+  return { records, builtAt: Date.parse(bundledSnapshot.capturedAt), bundled: true };
 }
 
 // Build the latest-dubbed catalog for one kind ("series" | "movie"): the feed
@@ -358,7 +368,8 @@ async function loadCatalog(kind) {
     seen.add(meta.id);
     return true;
   });
-  feedMetaCache[kind] = { metas, builtAt: feed.builtAt };
+  // Only the live cache may extend the lifetime of a recent feed.
+  if (!feed.bundled) feedMetaCache[kind] = { metas, builtAt: feed.builtAt };
   debug(`buildCatalog(${kind}): ${metas.length} distinct kitsu meta(s) cached`);
   return metas;
 }
@@ -380,10 +391,13 @@ function searchableTitle(value) {
 async function searchDubbedIndex(query) {
   const key = searchableTitle(query);
   if (!key) return [];
-  const index = dubbedIndexCache && Date.now() - dubbedIndexCache.builtAt < SOURCE_STALE_MS
-    ? dubbedIndexCache.index
-    : await buildDubbedIndex();
-  return [...index.values()].filter(record => {
+  let records = bundledSnapshot.archive;
+  if (dubbedIndexCache && Date.now() - dubbedIndexCache.builtAt < SOURCE_STALE_MS) {
+    records = [...dubbedIndexCache.index.values()];
+  } else if (!records.length) {
+    records = [...(await buildDubbedIndex()).values()];
+  }
+  return records.filter(record => {
     if (record._source === "MyAnimeList cast") return false;
     return [record.title, record.title_it, record.title_eng, record.title_ja]
       .some(title => searchableTitle(title).includes(key));
@@ -443,19 +457,26 @@ function buildDubbedIndex() {
   return dubbedIndexPending;
 }
 
+function addDubbedRecords(index, records) {
+  for (const record of records) {
+    if (record.mal_id == null) continue;
+    const id = String(record.mal_id);
+    if (!index.has(id)) index.set(id, record);
+  }
+}
+
 async function loadDubbedIndex() {
   const cached = dubbedIndexCache;
   if (cached && Date.now() - cached.builtAt < cached.ttl) return cached.index;
   const index = new Map();
   try {
     const { records, partial } = await animeunity.getArchive("", ARCHIVE_PAGE_LIMIT);
-    for (const record of records) {
-      if (record.mal_id != null && !index.has(String(record.mal_id))) index.set(String(record.mal_id), record);
-    }
+    addDubbedRecords(index, records);
     if (partial && cached?.ttl === DUBBED_INDEX_TTL_MS && Date.now() - cached.builtAt < SOURCE_STALE_MS) {
       for (const [id, record] of cached.index) if (!index.has(id)) index.set(id, record);
     }
     if (!index.size) throw new Error("AnimeUnity dubbed archive is empty");
+    if (partial) addDubbedRecords(index, bundledSnapshot.archive);
     dubbedIndexCache = { index, builtAt: Date.now(), ttl: partial ? 60000 : DUBBED_INDEX_TTL_MS };
     return index;
   } catch (error) {
@@ -471,14 +492,18 @@ async function loadDubbedIndex() {
       const alternate = new Map();
       // Recent confirmed dubs also cover newly airing shows before the full
       // archive scan finishes, preserving MAL's airing ranking as well.
-      for (const record of [...result.records, ...latest]) {
-        if (record._dubbed && record.mal_id != null && !alternate.has(String(record.mal_id))) alternate.set(String(record.mal_id), record);
-      }
+      addDubbedRecords(alternate, [...result.records, ...latest].filter(record => record._dubbed));
+      if (!result.complete || !alternate.size) addDubbedRecords(alternate, bundledSnapshot.archive);
       if (!alternate.size) throw new Error("AnimeWorld archive has no verified MAL mappings");
       dubbedIndexCache = { index: alternate, builtAt: Date.now(), ttl: result.complete ? DUBBED_INDEX_TTL_MS : 60000 };
       return alternate;
     } catch (fallbackError) {
       if (cached && Date.now() - cached.builtAt < SOURCE_STALE_MS) return cached.index;
+      addDubbedRecords(index, bundledSnapshot.archive);
+      if (index.size) {
+        dubbedIndexCache = { index, builtAt: Date.now(), ttl: 60000 };
+        return index;
+      }
       throw new Error(`Dubbed archives unavailable: ${error.message}; ${fallbackError.message}`);
     }
   }
@@ -616,6 +641,7 @@ async function getTopAiringDubbedCatalog(skip, tmdbKey) {
 
 function getCatalogStatus() {
   return {
+    bundledSnapshot: { capturedAt: bundledSnapshot.capturedAt, archive: bundledSnapshot.archive.length, recent: bundledSnapshot.getRecent().length },
     dubbedIndex: dubbedIndexCache ? { count: dubbedIndexCache.index.size, partial: dubbedIndexCache.ttl < DUBBED_INDEX_TTL_MS } : null,
     airingRecords: airingRecordsCache?.records.length ?? null,
     airingMetas: airingMetaCache?.metas.length ?? null,

@@ -286,3 +286,9 @@ TOP Posters autentica le richieste con la chiave negli URL delle immagini;
 il manifest e le risposte dei cataloghi configurati restano personali. La
 chiave non viene inserita nel repository o nei log dell'addon.
 Riferimento: https://top-posters.com/api e https://top-posters.com/openapi.json.
+
+## Archivio di riserva
+
+La distribuzione include una copia dei metadati dei titoli con doppiaggio italiano verificato. Se l'archivio live è indisponibile o parziale, la copia completa l'indice usato da ricerca e classifiche. Le classifiche continuano a seguire l'ordine MyAnimeList.
+
+Le ultime uscite usano la copia per un massimo di sette giorni dalla rilevazione quando entrambi i feed live sono indisponibili. In quel caso mostrano le ultime uscite rilevate alla data della copia. `/health` riporta la data e il numero di voci incluse. Per aggiornare la copia, eseguire `npm run refresh-dubbed-snapshot` da un ambiente che raggiunge AnimeUnity. Se l'archivio risulta parziale, lo script conserva la copia esistente.

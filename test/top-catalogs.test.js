@@ -4,6 +4,7 @@ const Module = require('node:module');
 
 function loadService(name, mocks) {
   if (name === "animeunity") {
+    mocks["./dubbed-snapshot"] ??= { archive: [], getRecent: () => [] };
     mocks["./mal-dubbed"] ??= { getDubbedMatches: async () => [] };
     mocks["./animeunity-source"] ??= { getArchive: async () => { throw new Error("AnimeUnity offline"); } };
   }
