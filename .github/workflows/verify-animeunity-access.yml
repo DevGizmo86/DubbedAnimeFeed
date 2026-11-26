@@ -1,0 +1,27 @@
+name: Verify AnimeUnity access
+on:
+  push:
+    branches: [verify/animeunity-actions-access]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - name: Fetch the full archive and latest releases
+        run: npm run refresh-dubbed-snapshot
+      - name: Check metadata counts and search coverage
+        run: |
+          node <<'NODE'
+          const data = require('./data/dubbed-snapshot.json');
+          const naruto = data.archive.filter(anime => /naruto/i.test(anime.title)).length;
+          console.log(JSON.stringify({ capturedAt: data.capturedAt, archive: data.archive.length, latest: data.recent.length, Naruto: naruto }));
+          if (data.archive.length < 1000 || !data.recent.length || !naruto) process.exit(1);
+          NODE
