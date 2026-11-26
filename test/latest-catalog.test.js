@@ -19,6 +19,7 @@ const episodes = (records) => records.map((anime, i) => ({ anime, number: i + 1,
 
 function service({ au, aw, mapping = (id) => id }) {
   return loadService("animeunity", {
+    "./dubbed-snapshot": { archive: [], getRecent: () => [] },
     "node-fetch": async (url) => {
       const id = new URL(url).searchParams.get("filter[externalId]");
       const mapped = await mapping(id);

@@ -87,3 +87,39 @@ test('health exposes aggregate source status without caching or fetching provide
  let body,cache;routes.get('/health')({}, {setHeader(name,value){cache=value},json(value){body=value}});
  assert.equal(cache,'no-store');assert.deepEqual(body,{version:addon.manifest.version,catalogs:status});
 });
+
+test("all seven catalog routes use verified data after a cold start with both dubbed sources unavailable", async (t) => {
+  const records = [
+    { id: 11, mal_id: 11, title: "Example", type: "TV" },
+    { id: 22, mal_id: 22, title: "Example: The Movie", type: "Movie" },
+  ];
+  const offline = async () => { throw new Error("Provider HTTP 502"); };
+  const service = loadWithMocks(require.resolve("../services/animeunity"), {
+    "./animeunity-source": { getArchive: offline, getRecent: offline },
+    "./animeworld": { getDubbedArchive: offline, getDubbedRecords: offline, getDubbedMatches: async () => [] },
+    "./mal-dubbed": { getDubbedMatches: async () => [] },
+    "./mal": { getTopAnime: async () => records.map(({ mal_id }) => ({ mal_id })) },
+    "./dubbed-snapshot": { archive: records, getRecent: () => records, capturedAt: new Date().toISOString() },
+    "node-fetch": async (url) => {
+      const id = new URL(url).searchParams.get("filter[externalId]");
+      return { ok: true, json: async () => ({ included: [{ id }] }) };
+    },
+  });
+  const configuredAddon = loadWithMocks(require.resolve("../addon"), { "./services/animeunity": service });
+  const app = express();
+  app.use(getRouter(configuredAddon));
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  for (const catalog of configuredAddon.manifest.catalogs) {
+    const extra = catalog.id.includes("search") ? "/search=Example" : "";
+    const response = await fetch(`${base}/catalog/${catalog.type}/${catalog.id}${extra}.json`);
+    assert.equal(response.status, 200, catalog.id);
+    const { metas } = await response.json();
+    const expected = catalog.id.includes("airing") ? ["kitsu:11", "kitsu:22"] : [
+      catalog.type === "series" ? "kitsu:11" : "kitsu:22",
+    ];
+    assert.deepEqual(metas.map(meta => meta.id), expected, catalog.id);
+  }
+});
