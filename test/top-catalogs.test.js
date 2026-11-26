@@ -3,7 +3,10 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 
 function loadService(name, mocks) {
-  if (name === "animeunity" && !("./mal-dubbed" in mocks)) mocks["./mal-dubbed"] = { getDubbedMatches: async () => [] };
+  if (name === "animeunity") {
+    mocks["./mal-dubbed"] ??= { getDubbedMatches: async () => [] };
+    mocks["./animeunity-source"] ??= { getArchive: async () => { throw new Error("AnimeUnity offline"); } };
+  }
   const path = require.resolve(`../services/${name}`);
   delete require.cache[path];
   const original = Module._load;
@@ -33,25 +36,16 @@ test('Jikan failures and malformed responses do not poison the ranking cache', a
 
 test('all three top catalogs recover after an archive failure and share archive requests', async (t) => {
   let archiveCalls = 0;
-  let homeCalls = 0;
   const animeunity = loadService('animeunity', {
-    'node-fetch': async (url) => {
-      if (url.endsWith('/')) {
-        homeCalls++;
-        return { ok: true, headers: { raw: () => ({}) }, text: async () => '<meta name="csrf-token" content="test">' };
-      }
-      if (url.includes('get-animes')) {
-        archiveCalls++;
-        if (archiveCalls === 1) return { ok: false, status: 503 };
-        if (archiveCalls === 2) return { ok: false, status: 419 };
-        return response({ records: [
-          { id: 1, mal_id: 1, type: 'TV', title_eng: 'Series' },
-          { id: 2, mal_id: 2, type: 'Movie', title_eng: 'Film' },
-        ] });
-      }
-      const id = new URL(url).searchParams.get('filter[externalId]');
-      return response({ included: [{ id }] });
-    },
+    './animeunity-source': { getArchive: async () => {
+      archiveCalls++;
+      if (archiveCalls === 1) throw new Error("AnimeUnity unavailable");
+      return { partial: false, records: [
+        { id: 1, mal_id: 1, type: 'TV', title_eng: 'Series' },
+        { id: 2, mal_id: 2, type: 'Movie', title_eng: 'Film' },
+      ] };
+    } },
+    'node-fetch': async url => response({ included: [{ id: new URL(url).searchParams.get('filter[externalId]') }] }),
     './mal': { getTopAnime: async () => [{ mal_id: 1 }, { mal_id: 2 }] },
     './tmdb': {},
     './animeworld': { getDubbedArchive: async () => { throw Error('offline'); }, getDubbedRecords: async () => { throw Error('offline'); } },
@@ -68,8 +62,7 @@ test('all three top catalogs recover after an archive failure and share archive 
   assert.equal(series.length, 1);
   assert.equal(movies.length, 1);
   assert.equal(airing.length, 2);
-  assert.equal(archiveCalls, 3);
-  assert.equal(homeCalls, 2);
+  assert.equal(archiveCalls, 2);
 
 });
 
@@ -137,7 +130,6 @@ test('cold AnimeUnity DNS outage retains all three Top catalogs using confirmed 
   const record=(id,type='TV',dub=true)=>({id:`aw:${id}`,mal_id:id,title:`Title ${id}`,type,_dubbed:dub});
   const au=loadService('animeunity',{
     'node-fetch':async url=>{
-      if(url.startsWith('https://www.animeunity.so'))throw Error('getaddrinfo ENOTFOUND');
       const id=new URL(url).searchParams.get('filter[externalId]');return response({included:[{id}]});
     },
     './animeworld':{
@@ -154,7 +146,7 @@ test('cold AnimeUnity DNS outage retains all three Top catalogs using confirmed 
 test('partial AnimeWorld archives refresh all derived Top caches after a minute instead of freezing missing titles',async t=>{
   let now=100000,scans=0;t.mock.method(Date,'now',()=>now);
   const au=loadService('animeunity',{
-    'node-fetch':async url=>{if(url.includes('animeunity.so'))throw Error('DNS');return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
+    'node-fetch':async url=>{return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
     './animeworld':{getDubbedArchive:async()=>({complete:false,records:Array.from({length:++scans},(_,i)=>({id:`aw:${i+1}`,mal_id:i+1,type:'TV',title:'Example',_dubbed:true}))}),getDubbedRecords:async()=>[]},
     './mal':{getTopAnime:async()=>[{mal_id:2},{mal_id:1}]},'./tmdb':{},
   });
@@ -166,7 +158,7 @@ test('partial AnimeWorld archives refresh all derived Top caches after a minute 
 test('airing candidates are verified directly when the alternate archive has no matches, preserving MAL order',async()=>{
  let lookedUp;
  const au=loadService('animeunity',{
-  'node-fetch':async url=>{if(url.includes('animeunity.so'))throw Error('DNS');return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
+  'node-fetch':async url=>{return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
   './animeworld':{
    getDubbedArchive:async()=>({complete:false,records:[{id:'aw:old',mal_id:99,_dubbed:true,type:'TV'}]}),getDubbedRecords:async()=>[],
    getDubbedMatches:async entries=>{lookedUp=entries;return[{id:'aw:two',mal_id:2,_dubbed:true,type:'TV',title:'Two'},{id:'aw:one',mal_id:1,_dubbed:true,type:'TV',title:'One'}]},
@@ -178,7 +170,7 @@ test('airing candidates are verified directly when the alternate archive has no 
 test('a partial archive still verifies missing airing titles and merges in MAL order',async()=>{
  const record=id=>({id:`aw:${id}`,mal_id:id,_dubbed:true,type:'TV',title:`Title ${id}`});
  const au=loadService('animeunity',{
-  'node-fetch':async url=>{if(url.includes('animeunity.so'))throw Error('DNS');return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
+  'node-fetch':async url=>{return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
   './animeworld':{getDubbedArchive:async()=>({complete:false,records:[record(2)]}),getDubbedRecords:async()=>[],getDubbedMatches:async()=>[record(1),record(2)]},
   './mal':{getTopAnime:async()=>[{mal_id:1},{mal_id:2}]},'./tmdb':{},
  });
@@ -188,7 +180,7 @@ test('a partial archive still verifies missing airing titles and merges in MAL o
 test('all Top catalogs retain MAL order with Italian cast confirmation when both archives fail',async()=>{
  const record=(id,type)=>({id:`mal:${id}`,mal_id:id,title:`Title ${id}`,type,_dubbed:true});
  const au=loadService('animeunity',{
-  'node-fetch':async url=>{if(url.includes('animeunity.so'))throw Error('DNS');return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
+  'node-fetch':async url=>{return response({included:[{id:new URL(url).searchParams.get('filter[externalId]')}]})},
   './animeworld':{getDubbedArchive:async()=>{throw Error('403')},getDubbedRecords:async()=>{throw Error('403')},getDubbedMatches:async()=>[]},
   './mal-dubbed':{getDubbedMatches:async()=>[record(2,'Movie'),record(1,'TV')]},
   './mal':{getTopAnime:async()=>[{mal_id:1},{mal_id:2}]},'./tmdb':{},

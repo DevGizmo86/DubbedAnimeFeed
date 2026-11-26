@@ -154,20 +154,24 @@ test("AnimeWorld episode evidence refreshes independently from the long-lived ti
   assert.equal(calls, 2);
 });
 
-test("AnimeUnity paginates actual records, rejects mismatches and preserves confirmed pages on later failure", async () => {
+test("AnimeUnity paginates actual Italian records and preserves confirmed pages on later failure", async () => {
   const ranges = [];
-  const au = load("animeunity", { "node-fetch": async (url) => {
+  const video = (language, is_hidden = false) => ({ id: 99, language, is_hidden });
+  const au = load("animeunity-source", { "node-fetch": async (url) => {
     const u = new URL(url);
-    assert.equal(u.pathname, "/info_api/10-example-ita/0");
-    const start = Number(u.searchParams.get("start_range"));
+    assert.equal(u.pathname, "/api/anime/10/episodes");
+    const start = Number(u.searchParams.get("start"));
     ranges.push(start);
     if (start === 241) return { ok: false, status: 503 };
-    const data = start === 1 ? [
-      { id: 1, number: "1", anime_id: 10 }, { id: 3, number: "3", anime_id: 10 },
-      { id: 4, number: "4", anime_id: 999 }, { id: 5, number: "5", is_uploaded: false },
-      { id: 6, number: "6", available: 0 }, { id: 7, number: "1.5" },
-    ] : [{ id: 121, number: "121", anime_id: 10 }];
-    return { ok: true, json: async () => ({ episodes: data }) };
+    const episodes = start === 1 ? [
+      { id: 1, number: "1", videos: [video("ita")] },
+      { id: 3, number: "3", videos: [video("ita"), video("jpn")] },
+      { id: 4, number: "4", videos: [video("jpn")] },
+      { id: 5, number: "5", videos: [video("ita", true)] },
+      { id: 6, number: "6", notices: [video("ita")] },
+      { id: 7, number: "1.5", videos: [video("ita")] },
+    ] : [{ id: 121, number: "121", videos: [video("ita")] }];
+    return { ok: true, json: async () => ({ episodes, start, tab_size: 120, total: 250 }) };
   }});
   assert.deepEqual(await au.getDubbedEpisodes({ id: 10, slug: "example-ita" }, 250), [1, 3, 121]);
   assert.deepEqual(ranges, [1, 121, 241]);
@@ -176,9 +180,9 @@ test("AnimeUnity paginates actual records, rejects mismatches and preserves conf
 test("AnimeUnity catalog mapping keeps source evidence for subsequent episode requests", async () => {
   const au = load("animeunity", {
     "node-fetch": async (url) => {
-      if (url.includes("animeunity.so")) return { ok: false, status: 503 };
       return { ok: true, json: async () => ({ included: [{ id: "55" }] }) };
     },
+    "./animeunity-source": { getRecent: async () => { throw new Error("AnimeUnity unavailable"); } },
     "./animeworld": { getDubbedRecords: async () => [{ id: "aw:example.abc", mal_id: 123, type: "TV", title: "Example", _confirmedDubbedEpisodes: [3], _observedAt: Date.now() }] },
   });
   await au.getDubbedCatalog("series", 0);
