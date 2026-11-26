@@ -15,6 +15,30 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
+      - name: Check public source endpoints separately
+        run: |
+          node <<'NODE'
+          const fetch = require('node-fetch');
+          const endpoints = {
+            archive: 'https://animeunity.cx/api/archive?language=ita&sort_by=score&page=1',
+            recent: 'https://animeunity.cx/api/home/latest-episodes?language=dub&per_page=20&page=1',
+          };
+          async function check([name, url]) {
+            try {
+              const response = await fetch(url, {
+                timeout: 8000,
+                headers: { Accept: 'application/json', 'User-Agent': 'DubbedAnimeFeed' },
+              });
+              const contentType = response.headers.get('content-type');
+              const mitigation = response.headers.get('cf-mitigated');
+              const data = response.ok && contentType?.includes('json') ? await response.json() : {};
+              console.log(JSON.stringify({ endpoint: name, status: response.status, contentType, mitigation, count: data.data?.length }));
+            } catch (e) {
+              console.log(JSON.stringify({ endpoint: name, error: e.message }));
+            }
+          }
+          Promise.all(Object.entries(endpoints).map(check));
+          NODE
       - name: Fetch the full archive and latest releases
         run: npm run refresh-dubbed-snapshot
       - name: Check metadata counts and search coverage
