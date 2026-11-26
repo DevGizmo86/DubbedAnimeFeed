@@ -155,22 +155,17 @@ app.listen(PORT, () => {
   console.log(`Addon attivo su http://localhost:${PORT}`);
   console.log(`Configura/installa su Stremio: http://localhost:${PORT}/configure`);
 
-  // Warm the "Top anime doppiati ITA" cache in the background: building it cold
-  // walks the full dubbed archive + the MAL top list, which is too slow to do
-  // inside the first catalog request. Errors here are non-fatal (it just
-  // rebuilds lazily on the first request instead). The airing catalog is warmed
-  // right after, so it reuses the dubbed-archive index instead of racing a
-  // second walk in parallel.
+  // Warm each home row so the first catalog request can reuse its cached page.
+  // The rank catalogs share the dubbed index and the latest catalogs share the feed.
   const tmdbKey = process.env.TMDB_API_KEY || null;
-  // Warm both latest catalogs with one shared two-source load. This is
-  // independent of the archive/MAL warm-up, so an AnimeUnity outage cannot
-  // prevent AnimeWorld's recent dubbed titles from appearing.
-  Promise.all([
-    getDubbedCatalog("series", 0, tmdbKey),
-    getDubbedCatalog("movie", 0, tmdbKey),
-  ]).catch((err) => console.error("Pre-build latest catalog fallito:", err.message));
-  getTopDubbedCatalog("series", 0, tmdbKey)
-    .catch((err) => console.error("Pre-build top catalog fallito:", err.message))
-    .then(() => getTopAiringDubbedCatalog(0, tmdbKey))
-    .catch((err) => console.error("Pre-build airing catalog fallito:", err.message));
+  const catalogs = [
+    ["latest series", getDubbedCatalog("series", 0, tmdbKey)],
+    ["latest movies", getDubbedCatalog("movie", 0, tmdbKey)],
+    ["top series", getTopDubbedCatalog("series", 0, tmdbKey)],
+    ["top movies", getTopDubbedCatalog("movie", 0, tmdbKey)],
+    ["airing", getTopAiringDubbedCatalog(0, tmdbKey)],
+  ];
+  for (const [name, catalog] of catalogs) {
+    catalog.catch(error => console.error(`Pre-build ${name} catalog fallito:`, error.message));
+  }
 });

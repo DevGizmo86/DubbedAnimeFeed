@@ -14,23 +14,21 @@ function loadService(name, mocks) {
 }
 
 const anime = (id, type = "TV") => ({ id, mal_id: id, title: `Anime ${id}`, type, dub: 1 });
-const feed = (items) => ({
-  ok: true,
-  text: async () => `<layout-items items-json="${JSON.stringify({ data: items }).replace(/"/g, "&quot;")}"></layout-items>`,
-});
+const feed = (items) => items.map(item => item.anime);
 const episodes = (records) => records.map((anime, i) => ({ anime, number: i + 1, created_at: "2026-10-01 12:00:00" }));
 
 function service({ au, aw, mapping = (id) => id }) {
   return loadService("animeunity", {
     "node-fetch": async (url) => {
-      if (url.startsWith("https://www.animeunity.so")) {
-        if (url.includes("?page=")) return feed([]);
-        return au();
-      }
       const id = new URL(url).searchParams.get("filter[externalId]");
       const mapped = await mapping(id);
       return { ok: true, json: async () => ({ included: mapped ? [{ id: String(mapped) }] : [] }) };
     },
+    "./animeunity-source": { getRecent: async () => {
+      const records = await au();
+      if (!Array.isArray(records)) throw new Error("AnimeUnity unavailable");
+      return records;
+    } },
     "./animeworld": { getDubbedRecords: aw },
     "./mal": {}, "./tmdb": {},
   });
@@ -72,12 +70,12 @@ test("one unavailable source does not prevent the other from returning results",
   }
 });
 
-test("invalid AnimeUnity HTML is a failure, and a cold total outage recovers after cooldown", async (t) => {
+test("a cold total outage recovers after cooldown", async (t) => {
   let now = 1000000;
   t.mock.method(Date, "now", () => now);
   let offline = true;
   const latest = service({
-    au: () => ({ ok: true, text: async () => "<html>maintenance</html>" }),
+    au: () => { throw new Error("AnimeUnity unavailable"); },
     aw: async () => { if (offline) throw new Error("offline"); return [anime(2)]; },
   });
   await assert.rejects(latest.getDubbedCatalog("series", 0), /All latest dubbed sources unavailable/);
